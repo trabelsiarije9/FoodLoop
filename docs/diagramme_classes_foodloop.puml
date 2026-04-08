@@ -1,0 +1,151 @@
+@startuml
+class Role {
+  +id : int
+  +code : string
+  +name : string
+  +description : text
+}
+
+abstract class User {
+  +id : bigint
+  +role_id : int
+  +first_name : string
+  +last_name : string
+  +email : string
+  +password_hash : string
+  +phone : string
+  +is_active : bool
+}
+
+class BusinessOwner {
+  +business_license : string
+}
+
+class AssociationAdmin {
+  +association_approval_code : string
+}
+
+class RegularUser {
+  +notification_radius_km : int
+}
+
+class SystemAdmin {
+  +admin_level : string
+}
+
+class Address {
+  +id : bigint
+  +label : string
+  +address_line : string
+  +city : string
+  +governorate : string
+}
+
+class Organization {
+  +id : bigint
+  +owner_user_id : bigint
+  +organization_type : enum
+  +name : string
+  +is_verified : bool
+}
+
+class FoodCategory {
+  +id : int
+  +name : string
+}
+
+class FoodItem {
+  +id : bigint
+  +organization_id : bigint
+  +category_id : int
+  +created_by : bigint
+  +title : string
+  +quantity : decimal
+  +expiration_date : datetime
+  +status : enum
+}
+
+class Reservation {
+  +id : bigint
+  +food_item_id : bigint
+  +user_id : bigint
+  +organization_id : bigint
+  +reserved_quantity : decimal
+  +status : enum
+}
+
+class Pickup {
+  +id : bigint
+  +reservation_id : bigint
+  +scheduled_at : datetime
+  +status : enum
+}
+
+class Distribution {
+  +id : bigint
+  +reservation_id : bigint
+  +association_id : bigint
+  +beneficiary_count : int
+}
+
+class Notification {
+  +id : bigint
+  +user_id : bigint
+  +food_item_id : bigint
+  +type : enum
+  +channel : enum
+  +status : enum
+}
+
+class UserNotificationPreference {
+  +id : bigint
+  +user_id : bigint
+  +receive_email : bool
+  +receive_sms : bool
+  +receive_web : bool
+}
+
+class AIPrediction {
+  +id : bigint
+  +food_item_id : bigint
+  +predicted_risk_level : enum
+  +predicted_expiration_probability : decimal
+}
+
+class AutomationLog {
+  +id : bigint
+  +action_type : enum
+  +reference_table : string
+  +reference_id : bigint
+  +status : enum
+}
+
+class Report {
+  +id : bigint
+  +generated_by : bigint
+  +report_type : enum
+  +period_start : date
+  +period_end : date
+}
+
+Role "1" -- "0..*" User
+User <|-- BusinessOwner
+User <|-- AssociationAdmin
+User <|-- RegularUser
+User <|-- SystemAdmin
+User "1" -- "0..*" Address
+User "1" -- "0..*" Organization
+Organization "1" -- "0..*" FoodItem
+FoodCategory "1" -- "0..*" FoodItem
+Address "1" -- "0..*" FoodItem
+FoodItem "1" -- "0..*" Reservation
+User "1" -- "0..*" Reservation
+Organization "1" -- "0..*" Reservation
+Reservation "1" -- "0..1" Pickup
+Reservation "1" -- "0..1" Distribution
+User "1" -- "0..*" Notification
+FoodItem "1" -- "0..*" Notification
+User "1" -- "0..1" UserNotificationPreference
+FoodItem "1" -- "0..*" AIPrediction
+User "1" -- "0..*" Report
+@enduml
