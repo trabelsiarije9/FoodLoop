@@ -140,7 +140,7 @@ $buildUrl = static function (array $overrides = []) use ($filters, $selectedActo
             <div class="container">
                 <div class="section-heading">
                     <p class="eyebrow">Recherche et consultation</p>
-                    <h2>Les annonces viennent de la base SQLite et respectent categories, zones, tags et proprietaires du diagramme.</h2>
+                    <h2>Les annonces viennent de la base MySQL et respectent categories, zones et proprietaires du diagramme.</h2>
                 </div>
 
                 <form class="filter-form reveal-target" method="get">
@@ -216,11 +216,6 @@ $buildUrl = static function (array $overrides = []) use ($filters, $selectedActo
                                     <dd><?= $escape($announcement['type_aliment']); ?></dd>
                                 </div>
                             </dl>
-                            <div class="tag-list">
-                                <?php foreach ($announcement['tags'] as $tag): ?>
-                                    <span><?= $escape($tag); ?></span>
-                                <?php endforeach; ?>
-                            </div>
                             <button class="action-pill action-pill-<?= $announcement['action']['tone']; ?>" type="button" <?= $announcement['action']['enabled'] ? '' : 'disabled'; ?>>
                                 <?= $escape($announcement['action']['label']); ?>
                             </button>
@@ -318,7 +313,7 @@ $buildUrl = static function (array $overrides = []) use ($filters, $selectedActo
                 <div class="stack-card reveal-target">
                     <div class="section-heading compact">
                         <p class="eyebrow">Suggestion IA</p>
-                        <h2>Les suggestions sont generees depuis Annonce et concernent commerces ou associations.</h2>
+                        <h2>Les suggestions sont generees depuis les annonces et concernent commerces ou associations.</h2>
                     </div>
                     <div class="timeline-list">
                         <?php foreach ($suggestions as $suggestion): ?>
@@ -345,8 +340,8 @@ $buildUrl = static function (array $overrides = []) use ($filters, $selectedActo
                         <?php foreach ($reports as $report): ?>
                             <article>
                                 <strong>Rapport #<?= $escape((string) $report['id_rapport']); ?></strong>
-                                <span><?= $escape($report['periode']); ?></span>
-                                <p><?= $escape((string) $report['nb_annonce']); ?> annonces | taux distribution <?= $escape((string) $report['taux_distribution']); ?></p>
+                                <span><?= $escape($report['report_type']); ?> | <?= $escape($report['periode']); ?></span>
+                                <p><?= $escape((string) $report['total_food_saved_kg']); ?> kg sauves | <?= $escape((string) $report['total_reservations']); ?> reservations | <?= $escape((string) $report['total_distributions']); ?> distributions</p>
                                 <p>Consultations commerce: <?= $escape((string) $report['lectures_commerce']); ?> | superadmin: <?= $escape((string) $report['lectures_super_admin']); ?></p>
                             </article>
                         <?php endforeach; ?>
@@ -403,7 +398,7 @@ $buildUrl = static function (array $overrides = []) use ($filters, $selectedActo
     <footer class="site-footer">
         <div class="container footer-content">
             <p>FoodLoop aligne sur le diagramme de classes + invite non connecte.</p>
-            <p>Base auto-initialisee via SQLite et PDO.</p>
+            <p>Base auto-initialisee via MySQL et PDO.</p>
         </div>
     </footer>
 

@@ -29,7 +29,7 @@ try {
         <body>
             <main>
                 <h1>Le projet ne peut pas demarrer pour le moment.</h1>
-                <p>La structure a ete convertie vers une application basee sur PDO + SQLite. Verifiez que l extension <strong>pdo_sqlite</strong> est disponible dans votre installation PHP.</p>
+                <p>La structure utilise maintenant PDO + MySQL. Verifiez que MariaDB ou MySQL est lance dans XAMPP et que l extension <strong>pdo_mysql</strong> est disponible.</p>
                 <code>{$message}</code>
             </main>
         </body>

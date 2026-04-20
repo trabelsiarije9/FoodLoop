@@ -209,10 +209,18 @@ CREATE TABLE IF NOT EXISTS distributions (
     admin_association_id BIGINT UNSIGNED NOT NULL,
     quantite_distrib INT UNSIGNED NOT NULL,
     date_distrib DATETIME NOT NULL,
-    statut VARCHAR(80) NOT NULL,
+    statut ENUM('planned', 'in_progress', 'completed', 'cancelled') NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_distributions_reservation FOREIGN KEY (reservation_id) REFERENCES reservations(id_reservation) ON DELETE CASCADE,
     CONSTRAINT fk_distributions_association FOREIGN KEY (admin_association_id) REFERENCES admins_association(id_admin_association) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS reservation_distributions (
+    reservation_id BIGINT UNSIGNED NOT NULL,
+    distribution_id BIGINT UNSIGNED NOT NULL,
+    PRIMARY KEY (reservation_id, distribution_id),
+    CONSTRAINT fk_reservation_distributions_reservation FOREIGN KEY (reservation_id) REFERENCES reservations(id_reservation) ON DELETE CASCADE,
+    CONSTRAINT fk_reservation_distributions_distribution FOREIGN KEY (distribution_id) REFERENCES distributions(id_distribution) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS reports (
@@ -226,6 +234,24 @@ CREATE TABLE IF NOT EXISTS reports (
     total_distributions INT UNSIGNED NOT NULL DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_reports_generated_by FOREIGN KEY (generated_by) REFERENCES super_admins(id_super_admin)
+);
+
+CREATE TABLE IF NOT EXISTS report_consultations_commerce (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    report_id BIGINT UNSIGNED NOT NULL,
+    proprietaire_id BIGINT UNSIGNED NOT NULL,
+    consulted_at DATETIME NOT NULL,
+    CONSTRAINT fk_report_consultations_commerce_report FOREIGN KEY (report_id) REFERENCES reports(id) ON DELETE CASCADE,
+    CONSTRAINT fk_report_consultations_commerce_owner FOREIGN KEY (proprietaire_id) REFERENCES proprietaires_commerce(id_commerce) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS report_consultations_super_admin (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    report_id BIGINT UNSIGNED NOT NULL,
+    super_admin_id BIGINT UNSIGNED NOT NULL,
+    consulted_at DATETIME NOT NULL,
+    CONSTRAINT fk_report_consultations_super_admin_report FOREIGN KEY (report_id) REFERENCES reports(id) ON DELETE CASCADE,
+    CONSTRAINT fk_report_consultations_super_admin_admin FOREIGN KEY (super_admin_id) REFERENCES super_admins(id_super_admin) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS notifications (

@@ -124,15 +124,17 @@ final class ActorContext
 
     public static function announcementAction(string $role, string $status): array
     {
-        $lockedForCitizen = in_array($status, ['priorite_association', 'reservee_association', 'distribution_planifiee'], true);
+        $lockedForCitizen = in_array($status, ['priority_access', 'reserved', 'picked_up', 'expired', 'cancelled'], true);
 
         return match ($role) {
             'utilisateur' => $lockedForCitizen
                 ? ['label' => 'Annonce non reservable pour ce profil', 'enabled' => false, 'tone' => 'muted']
                 : ['label' => 'Reserver et payer', 'enabled' => true, 'tone' => 'primary'],
-            'association' => $status === 'distribution_planifiee'
-                ? ['label' => 'Suivre la collecte', 'enabled' => true, 'tone' => 'secondary']
-                : ['label' => 'Reserver en priorite', 'enabled' => true, 'tone' => 'primary'],
+            'association' => in_array($status, ['reserved', 'picked_up', 'expired', 'cancelled'], true)
+                ? ['label' => 'Annonce deja traitee', 'enabled' => false, 'tone' => 'muted']
+                : ($status === 'priority_access'
+                    ? ['label' => 'Suivre la collecte', 'enabled' => true, 'tone' => 'secondary']
+                    : ['label' => 'Reserver en priorite', 'enabled' => true, 'tone' => 'primary']),
             'commerce' => ['label' => 'Modifier ou supprimer', 'enabled' => true, 'tone' => 'secondary'],
             'superadmin' => ['label' => 'Moderer l annonce', 'enabled' => true, 'tone' => 'secondary'],
             default => ['label' => 'Connexion requise pour reserver', 'enabled' => false, 'tone' => 'muted'],

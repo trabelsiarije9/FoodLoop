@@ -20,14 +20,14 @@ final class PlatformRepository
     {
         $announcementCount = $this->fetchCount('SELECT COUNT(*) FROM annonces');
         $reservationCount = $this->fetchCount('SELECT COUNT(*) FROM reservations');
-        $distributionCount = $this->fetchCount("SELECT COUNT(*) FROM distributions WHERE statut = 'terminee'");
-        $notificationCount = $this->fetchCount('SELECT COUNT(*) FROM notifications WHERE est_lue = 0');
+        $distributionCount = $this->fetchCount("SELECT COUNT(*) FROM distributions WHERE statut = 'completed'");
+        $notificationCount = $this->fetchCount('SELECT COUNT(*) FROM notifications WHERE read_at IS NULL');
 
         return [
             'name' => 'FoodLoop',
             'tagline' => 'Prototype reconstruit autour du diagramme de classes',
             'headline' => 'Base de donnees, roles, relations et ecrans sont maintenant organises autour des entites UML du projet.',
-            'description' => 'Le modele couvre les annonces, reservations, paiements, recus, distributions, notifications, suggestions IA, rapports et les quatre profils connectes, avec un etat supplementaire pour l utilisateur non connecte.',
+            'description' => 'Le modele couvre les annonces, reservations, paiements, recus, distributions, notifications, suggestions IA, rapports et les quatre profils connectes, sur une base MySQL coherente avec l UML.',
             'activeRole' => $actorRole,
             'referenceNow' => PlatformClock::displayReferenceNow(),
             'stats' => [
@@ -64,22 +64,19 @@ final class PlatformRepository
                 a.unite,
                 a.localisation,
                 a.statut,
-                a.date_creation,
-                a.date_visibilite_utilisateur,
+                a.created_at AS date_creation,
+                a.public_visibility_at AS date_visibilite_utilisateur,
                 a.date_expiration,
                 c.nom AS categorie_nom,
                 z.nom AS zone_nom,
                 z.ville_nom,
                 z.code_postal,
                 p.nom_commerce,
-                p.type_commerce,
-                GROUP_CONCAT(DISTINCT t.libelle) AS tags_csv
+                p.type_commerce
             FROM annonces a
             INNER JOIN categories c ON c.id_cat = a.categorie_id
             INNER JOIN zones_geographiques z ON z.id_zone = a.zone_id
             INNER JOIN proprietaires_commerce p ON p.id_commerce = a.proprietaire_id
-            LEFT JOIN annonce_tags at ON at.annonce_id = a.id_annonce
-            LEFT JOIN tags t ON t.id_tag = at.tag_id
             WHERE 1 = 1
         SQL;
 
@@ -101,7 +98,7 @@ final class PlatformRepository
         }
 
         if (in_array($actorRole, ['invite', 'utilisateur'], true)) {
-            $sql .= ' AND a.date_visibilite_utilisateur <= :reference_now';
+            $sql .= ' AND a.public_visibility_at <= :reference_now';
             $params['reference_now'] = PlatformClock::referenceNow();
         }
 
@@ -114,8 +111,8 @@ final class PlatformRepository
                 a.unite,
                 a.localisation,
                 a.statut,
-                a.date_creation,
-                a.date_visibilite_utilisateur,
+                a.created_at,
+                a.public_visibility_at,
                 a.date_expiration,
                 c.nom,
                 z.nom,
@@ -123,21 +120,13 @@ final class PlatformRepository
                 z.code_postal,
                 p.nom_commerce,
                 p.type_commerce
-            ORDER BY a.date_creation DESC
+            ORDER BY a.created_at DESC
         ';
 
         $statement = $this->connection->prepare($sql);
         $statement->execute($params);
 
-        return array_map(
-            static function (array $row): array {
-                $row['tags'] = $row['tags_csv'] !== null ? explode(',', $row['tags_csv']) : [];
-                unset($row['tags_csv']);
-
-                return $row;
-            },
-            $statement->fetchAll()
-        );
+        return $statement->fetchAll();
     }
 
     public function getPreferenceProfile(): array
@@ -145,15 +134,15 @@ final class PlatformRepository
         $statement = $this->connection->query(
             <<<SQL
                 SELECT
-                    u.prenom || ' ' || u.nom AS utilisateur,
+                    CONCAT(u.prenom, ' ', u.nom) AS utilisateur,
                     (
-                        SELECT GROUP_CONCAT(c.nom, ', ')
+                        SELECT GROUP_CONCAT(c.nom ORDER BY c.nom SEPARATOR ', ')
                         FROM utilisateur_categories uc
                         INNER JOIN categories c ON c.id_cat = uc.categorie_id
                         WHERE uc.utilisateur_id = u.id_util
                     ) AS categories,
                     (
-                        SELECT GROUP_CONCAT(z.nom, ', ')
+                        SELECT GROUP_CONCAT(z.nom ORDER BY z.nom SEPARATOR ', ')
                         FROM utilisateur_zones uz
                         INNER JOIN zones_geographiques z ON z.id_zone = uz.zone_id
                         WHERE uz.utilisateur_id = u.id_util
@@ -200,7 +189,7 @@ final class PlatformRepository
                     r.date_reservation,
                     r.date_pickup,
                     a.titre AS annonce_titre,
-                    COALESCE(u.prenom || ' ' || u.nom, aa.nom_association) AS demandeur,
+                    COALESCE(CONCAT(u.prenom, ' ', u.nom), aa.nom_association) AS demandeur,
                     CASE
                         WHEN r.utilisateur_id IS NOT NULL THEN 'Utilisateur'
                         ELSE 'AdminAssociation'
@@ -210,7 +199,7 @@ final class PlatformRepository
                     p.statut AS paiement_statut,
                     p.date_paiement,
                     re.date_emission,
-                    GROUP_CONCAT(DISTINCT d.statut) AS distribution_statuts
+                    GROUP_CONCAT(DISTINCT d.statut ORDER BY d.statut SEPARATOR ',') AS distribution_statuts
                 FROM reservations r
                 INNER JOIN annonces a ON a.id_annonce = r.annonce_id
                 LEFT JOIN utilisateurs u ON u.id_util = r.utilisateur_id
@@ -226,11 +215,8 @@ final class PlatformRepository
                     r.date_reservation,
                     r.date_pickup,
                     a.titre,
-                    COALESCE(u.prenom || ' ' || u.nom, aa.nom_association),
-                    CASE
-                        WHEN r.utilisateur_id IS NOT NULL THEN 'Utilisateur'
-                        ELSE 'AdminAssociation'
-                    END,
+                    demandeur,
+                    demandeur_type,
                     p.montant,
                     p.methode_paiement,
                     p.statut,
@@ -242,7 +228,7 @@ final class PlatformRepository
 
         return array_map(
             static function (array $row): array {
-                $row['distribution_statuts'] = $row['distribution_statuts'] !== null
+                $row['distribution_statuts'] = $row['distribution_statuts'] !== null && $row['distribution_statuts'] !== ''
                     ? explode(',', $row['distribution_statuts'])
                     : [];
 
@@ -273,13 +259,13 @@ final class PlatformRepository
             <<<SQL
                 SELECT
                     n.message_notification,
-                    n.date_envoi,
-                    n.est_lue,
+                    n.sent_at AS date_envoi,
+                    (n.read_at IS NOT NULL) AS est_lue,
                     a.titre AS annonce_titre
                 FROM notifications n
                 LEFT JOIN annonces a ON a.id_annonce = n.annonce_id
                 WHERE n.{$mapping['column']} = :recipient_id
-                ORDER BY n.date_envoi DESC
+                ORDER BY n.sent_at DESC
                 LIMIT 4
             SQL
         );
@@ -292,28 +278,39 @@ final class PlatformRepository
     {
         $sql = <<<SQL
             SELECT
-                s.id_ia,
-                s.message,
+                s.id AS id_ia,
+                s.recommended_action AS message,
                 a.titre AS annonce_titre,
                 p.nom_commerce,
-                aa.nom_association
+                (
+                    SELECT aa.nom_association
+                    FROM reservations r
+                    INNER JOIN admins_association aa ON aa.id_admin_association = r.admin_association_id
+                    WHERE r.annonce_id = a.id_annonce
+                    ORDER BY r.id_reservation DESC
+                    LIMIT 1
+                ) AS nom_association
             FROM suggestions_ia s
-            INNER JOIN annonces a ON a.id_annonce = s.annonce_id
-            INNER JOIN proprietaires_commerce p ON p.id_commerce = s.proprietaire_id
-            LEFT JOIN admins_association aa ON aa.id_admin_association = s.admin_association_id
+            INNER JOIN annonces a ON a.id_annonce = s.food_item_id
+            INNER JOIN proprietaires_commerce p ON p.id_commerce = a.proprietaire_id
         SQL;
 
         $params = [];
 
         if ($actorRole === 'commerce') {
-            $sql .= ' WHERE s.proprietaire_id = :role_id';
+            $sql .= ' WHERE a.proprietaire_id = :role_id';
             $params['role_id'] = $this->fetchScalar('SELECT id_commerce FROM proprietaires_commerce ORDER BY id_commerce LIMIT 1');
         } elseif ($actorRole === 'association') {
-            $sql .= ' WHERE s.admin_association_id = :role_id';
+            $sql .= ' WHERE EXISTS (
+                SELECT 1
+                FROM reservations r
+                WHERE r.annonce_id = a.id_annonce
+                  AND r.admin_association_id = :role_id
+            )';
             $params['role_id'] = $this->fetchScalar('SELECT id_admin_association FROM admins_association ORDER BY id_admin_association LIMIT 1');
         }
 
-        $sql .= ' ORDER BY s.id_ia DESC LIMIT 4';
+        $sql .= ' ORDER BY s.generated_at DESC LIMIT 4';
 
         $statement = $this->connection->prepare($sql);
         $statement->execute($params);
@@ -326,22 +323,24 @@ final class PlatformRepository
         $statement = $this->connection->query(
             <<<SQL
                 SELECT
-                    r.id_rapport,
-                    r.nb_annonce,
-                    r.taux_distribution,
-                    r.periode,
+                    r.id AS id_rapport,
+                    r.report_type,
+                    CONCAT(DATE_FORMAT(r.period_start, '%d/%m/%Y'), ' -> ', DATE_FORMAT(r.period_end, '%d/%m/%Y')) AS periode,
+                    r.total_food_saved_kg,
+                    r.total_reservations,
+                    r.total_distributions,
                     (
                         SELECT COUNT(*)
-                        FROM rapport_consultations_commerce rc
-                        WHERE rc.rapport_id = r.id_rapport
+                        FROM report_consultations_commerce rc
+                        WHERE rc.report_id = r.id
                     ) AS lectures_commerce,
                     (
                         SELECT COUNT(*)
-                        FROM rapport_consultations_super_admin rs
-                        WHERE rs.rapport_id = r.id_rapport
+                        FROM report_consultations_super_admin rs
+                        WHERE rs.report_id = r.id
                     ) AS lectures_super_admin
-                FROM rapports r
-                ORDER BY r.id_rapport DESC
+                FROM reports r
+                ORDER BY r.id DESC
             SQL
         );
 
@@ -354,7 +353,7 @@ final class PlatformRepository
             'utilisateur' => $this->fetchSingle(
                 <<<SQL
                     SELECT
-                        prenom || ' ' || nom AS nom_affiche,
+                        CONCAT(prenom, ' ', nom) AS nom_affiche,
                         email AS detail_principal,
                         'Consultation, reservation et paiement utilisateur.' AS resume
                     FROM utilisateurs
@@ -417,10 +416,10 @@ final class PlatformRepository
             'distributions' => 'Classe Distribution',
             'notifications' => 'Classe Notification',
             'suggestions_ia' => 'Classe SuggestionIA',
-            'rapports' => 'Classe Rapport',
-            'annonce_tags' => 'Relation Annonce <-> Tag',
+            'reports' => 'Classe Rapport',
             'utilisateur_categories' => 'Relation Utilisateur <-> Categorie',
             'utilisateur_zones' => 'Relation Utilisateur <-> ZoneGeographique',
+            'reservation_distributions' => 'Relation Reservation <-> Distribution',
         ];
 
         $coverage = [];

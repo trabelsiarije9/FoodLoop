@@ -33,12 +33,6 @@ final class UmlModelCatalog
                 'operations' => ['modifier()', 'supprimer()', 'changerStatut()'],
             ],
             [
-                'name' => 'Tag',
-                'table' => 'tags',
-                'attributes' => ['idTag:int', 'libelle:string'],
-                'operations' => ['s etiqueter via annonce_tags'],
-            ],
-            [
                 'name' => 'Notification',
                 'table' => 'notifications',
                 'attributes' => ['idNotif:int', 'messageNotif:string', 'dateEnvoi:DateTime'],
@@ -94,7 +88,7 @@ final class UmlModelCatalog
             ],
             [
                 'name' => 'Rapport',
-                'table' => 'rapports',
+                'table' => 'reports',
                 'attributes' => ['idRapp:int', 'nbAnnonce:int', 'tauxDistribution:float'],
                 'operations' => ['generer()', 'exporterRapport()'],
             ],
@@ -105,8 +99,8 @@ final class UmlModelCatalog
     {
         return [
             'L utilisateur non connecte est gere comme un etat d acces et non comme une table persistante.',
-            'Les relations plusieurs-a-plusieurs du diagramme sont materialisees avec des tables pivots: annonce_tags, utilisateur_categories, utilisateur_zones et reservation_distributions.',
-            'Les notifications et reservations utilisent des cles de role dediees pour distinguer les flux utilisateur, association et commerce.',
+            'Les relations plusieurs-a-plusieurs du diagramme sont materialisees avec les tables pivots utilisateur_categories, utilisateur_zones et reservation_distributions.',
+            'Le projet est initialise sur MySQL via PDO, avec bootstrap automatique du schema et du jeu de donnees.',
         ];
     }
 }

@@ -134,8 +134,12 @@ INSERT INTO pickups (id, reservation_id, scheduled_at, picked_up_at, receiver_na
     (4, 4, '2026-04-20 16:00:00', NULL, 'Equipe Sfax', '74444000', 'PU-SFAX-004', 'in_progress', '2026-04-20 13:35:00');
 
 INSERT INTO distributions (id_distribution, reservation_id, admin_association_id, quantite_distrib, date_distrib, statut, created_at) VALUES
-    (1, 2, 1, 20, '2026-04-20 16:10:00', 'planned', '2026-04-20 14:25:00'),
+    (1, 2, 1, 20, '2026-04-20 16:10:00', 'completed', '2026-04-20 14:25:00'),
     (2, 4, 2, 12, '2026-04-20 16:20:00', 'in_progress', '2026-04-20 13:45:00');
+
+INSERT INTO reservation_distributions (reservation_id, distribution_id) VALUES
+    (2, 1),
+    (4, 2);
 
 INSERT INTO reports (
     id,
@@ -150,6 +154,15 @@ INSERT INTO reports (
 ) VALUES
     (1, 1, 'daily', '2026-04-20', '2026-04-20', 148.50, 4, 2, '2026-04-20 18:30:00'),
     (2, 1, 'weekly', '2026-04-14', '2026-04-20', 612.80, 18, 11, '2026-04-20 18:40:00');
+
+INSERT INTO report_consultations_commerce (id, report_id, proprietaire_id, consulted_at) VALUES
+    (1, 1, 1, '2026-04-20 18:35:00'),
+    (2, 1, 2, '2026-04-20 18:36:00'),
+    (3, 2, 3, '2026-04-20 18:45:00');
+
+INSERT INTO report_consultations_super_admin (id, report_id, super_admin_id, consulted_at) VALUES
+    (1, 1, 1, '2026-04-20 18:33:00'),
+    (2, 2, 1, '2026-04-20 18:43:00');
 
 INSERT INTO notifications (
     id_notification,
