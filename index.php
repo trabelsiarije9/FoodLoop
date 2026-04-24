@@ -29,7 +29,7 @@ try {
         <body>
             <main>
                 <h1>Le projet ne peut pas demarrer pour le moment.</h1>
-                <p>La structure utilise maintenant PDO + MySQL. Verifiez que MariaDB ou MySQL est lance dans XAMPP et que l extension <strong>pdo_mysql</strong> est disponible.</p>
+                <p>La structure utilise PDO avec MySQL ou Oracle. Verifiez que le serveur choisi est disponible et que l extension PDO correspondante est active (`pdo_mysql` ou `pdo_oci`).</p>
                 <code>{$message}</code>
             </main>
         </body>

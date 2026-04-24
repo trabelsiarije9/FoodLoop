@@ -17,11 +17,8 @@ final class Database
             return self::$connection;
         }
 
-        if (!extension_loaded('pdo_mysql')) {
-            throw new RuntimeException('L extension pdo_mysql est requise pour utiliser FoodLoop avec MySQL.');
-        }
-
         $config = self::configuration();
+        self::assertPdoExtension($config['driver']);
         DatabaseBootstrapper::ensureDatabase($config);
 
         try {
@@ -35,8 +32,10 @@ final class Database
                 ]
             );
         } catch (PDOException $exception) {
+            $platform = self::driverLabel($config['driver']);
+
             throw new RuntimeException(
-                'Connexion MySQL impossible. Verifiez XAMPP, les identifiants et la base `' . $config['database'] . '`.',
+                'Connexion ' . $platform . ' impossible. Verifiez les identifiants et le schema `' . $config['database'] . '`.',
                 0,
                 $exception
             );
@@ -58,6 +57,46 @@ final class Database
 
     public static function dsn(array $config, bool $withDatabase): string
     {
+        return match ($config['driver']) {
+            'mysql' => self::mysqlDsn($config, $withDatabase),
+            'oracle' => self::oracleDsn($config, $withDatabase),
+            default => throw new RuntimeException('Driver de base de donnees non supporte: ' . $config['driver']),
+        };
+    }
+
+    public static function driver(): string
+    {
+        $config = self::configuration();
+
+        return $config['driver'];
+    }
+
+    public static function driverLabel(string $driver): string
+    {
+        return match ($driver) {
+            'mysql' => 'MySQL',
+            'oracle' => 'Oracle',
+            default => strtoupper($driver),
+        };
+    }
+
+    private static function assertPdoExtension(string $driver): void
+    {
+        $extension = match ($driver) {
+            'mysql' => 'pdo_mysql',
+            'oracle' => 'pdo_oci',
+            default => throw new RuntimeException('Driver de base de donnees non supporte: ' . $driver),
+        };
+
+        if (!extension_loaded($extension)) {
+            throw new RuntimeException(
+                'L extension ' . $extension . ' est requise pour utiliser FoodLoop avec ' . self::driverLabel($driver) . '.'
+            );
+        }
+    }
+
+    private static function mysqlDsn(array $config, bool $withDatabase): string
+    {
         $dsn = sprintf(
             'mysql:host=%s;port=%d;charset=%s',
             $config['host'],
@@ -70,5 +109,28 @@ final class Database
         }
 
         return $dsn;
+    }
+
+    private static function oracleDsn(array $config, bool $withDatabase): string
+    {
+        $service = $config['service_name'] !== '' ? $config['service_name'] : $config['database'];
+
+        if ($withDatabase) {
+            return sprintf(
+                'oci:dbname=//%s:%d/%s;charset=%s',
+                $config['host'],
+                $config['port'],
+                $service,
+                $config['charset']
+            );
+        }
+
+        return sprintf(
+            'oci:dbname=//%s:%d/%s;charset=%s',
+            $config['host'],
+            $config['port'],
+            $service,
+            $config['charset']
+        );
     }
 }

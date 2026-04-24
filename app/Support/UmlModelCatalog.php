@@ -100,7 +100,7 @@ final class UmlModelCatalog
         return [
             'L utilisateur non connecte est gere comme un etat d acces et non comme une table persistante.',
             'Les relations plusieurs-a-plusieurs du diagramme sont materialisees avec les tables pivots utilisateur_categories, utilisateur_zones et reservation_distributions.',
-            'Le projet est initialise sur MySQL via PDO, avec bootstrap automatique du schema et du jeu de donnees.',
+            'Le projet est initialise via PDO sur MySQL ou Oracle, avec bootstrap automatique du schema et du jeu de donnees selon le driver choisi.',
         ];
     }
 }

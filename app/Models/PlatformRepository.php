@@ -10,10 +10,12 @@ use PDO;
 final class PlatformRepository
 {
     private PDO $connection;
+    private string $driver;
 
     public function __construct(?PDO $connection = null)
     {
         $this->connection = $connection ?? Database::connection();
+        $this->driver = Database::driver();
     }
 
     public function getPlatformOverview(string $actorRole): array
@@ -27,7 +29,7 @@ final class PlatformRepository
             'name' => 'FoodLoop',
             'tagline' => 'Prototype reconstruit autour du diagramme de classes',
             'headline' => 'Base de donnees, roles, relations et ecrans sont maintenant organises autour des entites UML du projet.',
-            'description' => 'Le modele couvre les annonces, reservations, paiements, recus, distributions, notifications, suggestions IA, rapports et les quatre profils connectes, sur une base MySQL coherente avec l UML.',
+            'description' => 'Le modele couvre les annonces, reservations, paiements, recus, distributions, notifications, suggestions IA, rapports et les quatre profils connectes, sur une base relationnelle coherente avec l UML.',
             'activeRole' => $actorRole,
             'referenceNow' => PlatformClock::displayReferenceNow(),
             'stats' => [
@@ -132,25 +134,27 @@ final class PlatformRepository
     public function getPreferenceProfile(): array
     {
         $statement = $this->connection->query(
-            <<<SQL
-                SELECT
-                    CONCAT(u.prenom, ' ', u.nom) AS utilisateur,
-                    (
-                        SELECT GROUP_CONCAT(c.nom ORDER BY c.nom SEPARATOR ', ')
-                        FROM utilisateur_categories uc
-                        INNER JOIN categories c ON c.id_cat = uc.categorie_id
-                        WHERE uc.utilisateur_id = u.id_util
-                    ) AS categories,
-                    (
-                        SELECT GROUP_CONCAT(z.nom ORDER BY z.nom SEPARATOR ', ')
-                        FROM utilisateur_zones uz
-                        INNER JOIN zones_geographiques z ON z.id_zone = uz.zone_id
-                        WHERE uz.utilisateur_id = u.id_util
-                    ) AS zones
-                FROM utilisateurs u
-                ORDER BY u.id_util
-                LIMIT 1
-            SQL
+            $this->limitSql(
+                <<<SQL
+                    SELECT
+                        {$this->concatExpression(['u.prenom', "' '", 'u.nom'])} AS utilisateur,
+                        (
+                            SELECT {$this->stringAggregateExpression('c.nom', "', '")}
+                            FROM utilisateur_categories uc
+                            INNER JOIN categories c ON c.id_cat = uc.categorie_id
+                            WHERE uc.utilisateur_id = u.id_util
+                        ) AS categories,
+                        (
+                            SELECT {$this->stringAggregateExpression('z.nom', "', '")}
+                            FROM utilisateur_zones uz
+                            INNER JOIN zones_geographiques z ON z.id_zone = uz.zone_id
+                            WHERE uz.utilisateur_id = u.id_util
+                        ) AS zones
+                    FROM utilisateurs u
+                    ORDER BY u.id_util
+                SQL,
+                1
+            )
         );
 
         return $statement->fetch() ?: [];
@@ -159,20 +163,22 @@ final class PlatformRepository
     public function getConsultationHistory(): array
     {
         $statement = $this->connection->query(
-            <<<SQL
-                SELECT
-                    ca.date_consultation,
-                    a.titre,
-                    c.nom AS categorie_nom,
-                    z.nom AS zone_nom
-                FROM consultations_annonces ca
-                INNER JOIN annonces a ON a.id_annonce = ca.annonce_id
-                INNER JOIN categories c ON c.id_cat = a.categorie_id
-                INNER JOIN zones_geographiques z ON z.id_zone = a.zone_id
-                WHERE ca.utilisateur_id = 1
-                ORDER BY ca.date_consultation DESC
-                LIMIT 4
-            SQL
+            $this->limitSql(
+                <<<SQL
+                    SELECT
+                        ca.date_consultation,
+                        a.titre,
+                        c.nom AS categorie_nom,
+                        z.nom AS zone_nom
+                    FROM consultations_annonces ca
+                    INNER JOIN annonces a ON a.id_annonce = ca.annonce_id
+                    INNER JOIN categories c ON c.id_cat = a.categorie_id
+                    INNER JOIN zones_geographiques z ON z.id_zone = a.zone_id
+                    WHERE ca.utilisateur_id = 1
+                    ORDER BY ca.date_consultation DESC
+                SQL,
+                4
+            )
         );
 
         return $statement->fetchAll();
@@ -189,7 +195,7 @@ final class PlatformRepository
                     r.date_reservation,
                     r.date_pickup,
                     a.titre AS annonce_titre,
-                    COALESCE(CONCAT(u.prenom, ' ', u.nom), aa.nom_association) AS demandeur,
+                    COALESCE({$this->concatExpression(['u.prenom', "' '", 'u.nom'])}, aa.nom_association) AS demandeur,
                     CASE
                         WHEN r.utilisateur_id IS NOT NULL THEN 'Utilisateur'
                         ELSE 'AdminAssociation'
@@ -199,7 +205,7 @@ final class PlatformRepository
                     p.statut AS paiement_statut,
                     p.date_paiement,
                     re.date_emission,
-                    GROUP_CONCAT(DISTINCT d.statut ORDER BY d.statut SEPARATOR ',') AS distribution_statuts
+                    {$this->distributionAggregateExpression()} AS distribution_statuts
                 FROM reservations r
                 INNER JOIN annonces a ON a.id_annonce = r.annonce_id
                 LEFT JOIN utilisateurs u ON u.id_util = r.utilisateur_id
@@ -215,8 +221,10 @@ final class PlatformRepository
                     r.date_reservation,
                     r.date_pickup,
                     a.titre,
-                    demandeur,
-                    demandeur_type,
+                    u.prenom,
+                    u.nom,
+                    aa.nom_association,
+                    r.utilisateur_id,
                     p.montant,
                     p.methode_paiement,
                     p.statut,
@@ -252,22 +260,27 @@ final class PlatformRepository
 
         $mapping = $columnMap[$actorRole];
         $recipientId = $this->fetchScalar(
-            'SELECT ' . $mapping['id'] . ' FROM ' . $mapping['table'] . ' ORDER BY ' . $mapping['id'] . ' LIMIT 1'
+            $this->limitSql(
+                'SELECT ' . $mapping['id'] . ' FROM ' . $mapping['table'] . ' ORDER BY ' . $mapping['id'],
+                1
+            )
         );
 
         $statement = $this->connection->prepare(
-            <<<SQL
-                SELECT
-                    n.message_notification,
-                    n.sent_at AS date_envoi,
-                    (n.read_at IS NOT NULL) AS est_lue,
-                    a.titre AS annonce_titre
-                FROM notifications n
-                LEFT JOIN annonces a ON a.id_annonce = n.annonce_id
-                WHERE n.{$mapping['column']} = :recipient_id
-                ORDER BY n.sent_at DESC
-                LIMIT 4
-            SQL
+            $this->limitSql(
+                <<<SQL
+                    SELECT
+                        n.message_notification,
+                        n.sent_at AS date_envoi,
+                        CASE WHEN n.read_at IS NOT NULL THEN 1 ELSE 0 END AS est_lue,
+                        a.titre AS annonce_titre
+                    FROM notifications n
+                    LEFT JOIN annonces a ON a.id_annonce = n.annonce_id
+                    WHERE n.{$mapping['column']} = :recipient_id
+                    ORDER BY n.sent_at DESC
+                SQL,
+                4
+            )
         );
         $statement->execute(['recipient_id' => $recipientId]);
 
@@ -283,12 +296,10 @@ final class PlatformRepository
                 a.titre AS annonce_titre,
                 p.nom_commerce,
                 (
-                    SELECT aa.nom_association
+                    SELECT MAX(aa.nom_association)
                     FROM reservations r
                     INNER JOIN admins_association aa ON aa.id_admin_association = r.admin_association_id
                     WHERE r.annonce_id = a.id_annonce
-                    ORDER BY r.id_reservation DESC
-                    LIMIT 1
                 ) AS nom_association
             FROM suggestions_ia s
             INNER JOIN annonces a ON a.id_annonce = s.food_item_id
@@ -299,7 +310,9 @@ final class PlatformRepository
 
         if ($actorRole === 'commerce') {
             $sql .= ' WHERE a.proprietaire_id = :role_id';
-            $params['role_id'] = $this->fetchScalar('SELECT id_commerce FROM proprietaires_commerce ORDER BY id_commerce LIMIT 1');
+            $params['role_id'] = $this->fetchScalar(
+                $this->limitSql('SELECT id_commerce FROM proprietaires_commerce ORDER BY id_commerce', 1)
+            );
         } elseif ($actorRole === 'association') {
             $sql .= ' WHERE EXISTS (
                 SELECT 1
@@ -307,10 +320,13 @@ final class PlatformRepository
                 WHERE r.annonce_id = a.id_annonce
                   AND r.admin_association_id = :role_id
             )';
-            $params['role_id'] = $this->fetchScalar('SELECT id_admin_association FROM admins_association ORDER BY id_admin_association LIMIT 1');
+            $params['role_id'] = $this->fetchScalar(
+                $this->limitSql('SELECT id_admin_association FROM admins_association ORDER BY id_admin_association', 1)
+            );
         }
 
-        $sql .= ' ORDER BY s.generated_at DESC LIMIT 4';
+        $sql .= ' ORDER BY s.generated_at DESC';
+        $sql = $this->limitSql($sql, 4);
 
         $statement = $this->connection->prepare($sql);
         $statement->execute($params);
@@ -325,7 +341,8 @@ final class PlatformRepository
                 SELECT
                     r.id AS id_rapport,
                     r.report_type,
-                    CONCAT(DATE_FORMAT(r.period_start, '%d/%m/%Y'), ' -> ', DATE_FORMAT(r.period_end, '%d/%m/%Y')) AS periode,
+                    r.period_start,
+                    r.period_end,
                     r.total_food_saved_kg,
                     r.total_reservations,
                     r.total_distributions,
@@ -344,7 +361,11 @@ final class PlatformRepository
             SQL
         );
 
-        return $statement->fetchAll();
+        return array_map(function (array $row): array {
+            $row['periode'] = $this->formatPeriod($row['period_start'], $row['period_end']);
+
+            return $row;
+        }, $statement->fetchAll());
     }
 
     public function getCurrentActorSnapshot(string $actorRole): array
@@ -353,13 +374,14 @@ final class PlatformRepository
             'utilisateur' => $this->fetchSingle(
                 <<<SQL
                     SELECT
-                        CONCAT(prenom, ' ', nom) AS nom_affiche,
+                        {$this->concatExpression(['prenom', "' '", 'nom'])} AS nom_affiche,
                         email AS detail_principal,
                         'Consultation, reservation et paiement utilisateur.' AS resume
                     FROM utilisateurs
                     ORDER BY id_util
-                    LIMIT 1
                 SQL
+                ,
+                1
             ) ?: [],
             'association' => $this->fetchSingle(
                 <<<SQL
@@ -369,8 +391,9 @@ final class PlatformRepository
                         'Peut reserver en priorite, planifier la collecte et gerer la distribution.' AS resume
                     FROM admins_association
                     ORDER BY id_admin_association
-                    LIMIT 1
                 SQL
+                ,
+                1
             ) ?: [],
             'commerce' => $this->fetchSingle(
                 <<<SQL
@@ -380,8 +403,9 @@ final class PlatformRepository
                         'Peut publier des annonces, consulter les reservations et valider les recuperations.' AS resume
                     FROM proprietaires_commerce
                     ORDER BY id_commerce
-                    LIMIT 1
                 SQL
+                ,
+                1
             ) ?: [],
             'superadmin' => $this->fetchSingle(
                 <<<SQL
@@ -391,8 +415,9 @@ final class PlatformRepository
                         'Peut gerer les comptes, moderer les annonces et consulter les rapports globaux.' AS resume
                     FROM super_admins
                     ORDER BY id_super_admin
-                    LIMIT 1
                 SQL
+                ,
+                1
             ) ?: [],
             default => [
                 'nom_affiche' => 'Visiteur anonyme',
@@ -445,8 +470,56 @@ final class PlatformRepository
         return (int) $this->connection->query($sql)->fetchColumn();
     }
 
-    private function fetchSingle(string $sql): array|false
+    private function fetchSingle(string $sql, ?int $limit = null): array|false
     {
+        if ($limit !== null) {
+            $sql = $this->limitSql($sql, $limit);
+        }
+
         return $this->connection->query($sql)->fetch();
+    }
+
+    private function limitSql(string $sql, int $limit): string
+    {
+        return match ($this->driver) {
+            'oracle' => rtrim($sql) . ' FETCH FIRST ' . $limit . ' ROWS ONLY',
+            default => rtrim($sql) . ' LIMIT ' . $limit,
+        };
+    }
+
+    private function concatExpression(array $parts): string
+    {
+        return match ($this->driver) {
+            'oracle' => implode(' || ', $parts),
+            default => 'CONCAT(' . implode(', ', $parts) . ')',
+        };
+    }
+
+    private function stringAggregateExpression(string $column, string $separatorLiteral): string
+    {
+        return match ($this->driver) {
+            'oracle' => 'LISTAGG(' . $column . ', ' . $separatorLiteral . ') WITHIN GROUP (ORDER BY ' . $column . ')',
+            default => 'GROUP_CONCAT(' . $column . ' ORDER BY ' . $column . ' SEPARATOR ' . $separatorLiteral . ')',
+        };
+    }
+
+    private function distributionAggregateExpression(): string
+    {
+        return match ($this->driver) {
+            'oracle' => "LISTAGG(d.statut, ',') WITHIN GROUP (ORDER BY d.statut)",
+            default => "GROUP_CONCAT(DISTINCT d.statut ORDER BY d.statut SEPARATOR ',')",
+        };
+    }
+
+    private function formatPeriod(string $start, string $end): string
+    {
+        $startDate = date_create($start);
+        $endDate = date_create($end);
+
+        if ($startDate === false || $endDate === false) {
+            return $start . ' -> ' . $end;
+        }
+
+        return $startDate->format('d/m/Y') . ' -> ' . $endDate->format('d/m/Y');
     }
 }

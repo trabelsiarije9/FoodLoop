@@ -140,7 +140,7 @@ $buildUrl = static function (array $overrides = []) use ($filters, $selectedActo
             <div class="container">
                 <div class="section-heading">
                     <p class="eyebrow">Recherche et consultation</p>
-                    <h2>Les annonces viennent de la base MySQL et respectent categories, zones et proprietaires du diagramme.</h2>
+                    <h2>Les annonces viennent de la base relationnelle et respectent categories, zones et proprietaires du diagramme.</h2>
                 </div>
 
                 <form class="filter-form reveal-target" method="get">
@@ -398,7 +398,7 @@ $buildUrl = static function (array $overrides = []) use ($filters, $selectedActo
     <footer class="site-footer">
         <div class="container footer-content">
             <p>FoodLoop aligne sur le diagramme de classes + invite non connecte.</p>
-            <p>Base auto-initialisee via MySQL et PDO.</p>
+            <p>Base auto-initialisee via PDO, en MySQL ou Oracle selon la configuration.</p>
         </div>
     </footer>
 
