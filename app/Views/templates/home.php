@@ -398,7 +398,7 @@ $buildUrl = static function (array $overrides = []) use ($filters, $selectedActo
     <footer class="site-footer">
         <div class="container footer-content">
             <p>FoodLoop aligne sur le diagramme de classes + invite non connecte.</p>
-            <p>Base auto-initialisee via PDO, en MySQL ou Oracle selon la configuration.</p>
+            <p>Base auto-initialisee via Oracle et PDO.</p>
         </div>
     </footer>
 

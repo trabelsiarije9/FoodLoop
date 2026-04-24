@@ -57,11 +57,11 @@ final class Database
 
     public static function dsn(array $config, bool $withDatabase): string
     {
-        return match ($config['driver']) {
-            'mysql' => self::mysqlDsn($config, $withDatabase),
-            'oracle' => self::oracleDsn($config, $withDatabase),
-            default => throw new RuntimeException('Driver de base de donnees non supporte: ' . $config['driver']),
-        };
+        if ($config['driver'] !== 'oracle') {
+            throw new RuntimeException('FoodLoop est configure uniquement pour Oracle.');
+        }
+
+        return self::oracleDsn($config, $withDatabase);
     }
 
     public static function driver(): string
@@ -73,42 +73,22 @@ final class Database
 
     public static function driverLabel(string $driver): string
     {
-        return match ($driver) {
-            'mysql' => 'MySQL',
-            'oracle' => 'Oracle',
-            default => strtoupper($driver),
-        };
+        return $driver === 'oracle' ? 'Oracle' : strtoupper($driver);
     }
 
     private static function assertPdoExtension(string $driver): void
     {
-        $extension = match ($driver) {
-            'mysql' => 'pdo_mysql',
-            'oracle' => 'pdo_oci',
-            default => throw new RuntimeException('Driver de base de donnees non supporte: ' . $driver),
-        };
+        if ($driver !== 'oracle') {
+            throw new RuntimeException('FoodLoop est configure uniquement pour Oracle.');
+        }
+
+        $extension = 'pdo_oci';
 
         if (!extension_loaded($extension)) {
             throw new RuntimeException(
                 'L extension ' . $extension . ' est requise pour utiliser FoodLoop avec ' . self::driverLabel($driver) . '.'
             );
         }
-    }
-
-    private static function mysqlDsn(array $config, bool $withDatabase): string
-    {
-        $dsn = sprintf(
-            'mysql:host=%s;port=%d;charset=%s',
-            $config['host'],
-            $config['port'],
-            $config['charset']
-        );
-
-        if ($withDatabase) {
-            $dsn .= ';dbname=' . $config['database'];
-        }
-
-        return $dsn;
     }
 
     private static function oracleDsn(array $config, bool $withDatabase): string

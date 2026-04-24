@@ -11,45 +11,11 @@ final class DatabaseBootstrapper
 {
     public static function ensureDatabase(array $config): void
     {
-        if ($config['driver'] === 'mysql') {
-            self::bootstrapMySql($config);
-            return;
+        if ($config['driver'] !== 'oracle') {
+            throw new RuntimeException('FoodLoop est configure uniquement pour Oracle.');
         }
 
-        if ($config['driver'] === 'oracle') {
-            self::bootstrapOracle($config);
-            return;
-        }
-
-        throw new RuntimeException('Driver de base de donnees non supporte pour le bootstrap: ' . $config['driver']);
-    }
-
-    private static function bootstrapMySql(array $config): void
-    {
-        self::assertDatabaseName($config['database']);
-
-        try {
-            $serverConnection = self::createPdo($config, false);
-        } catch (PDOException $exception) {
-            throw new RuntimeException('Impossible de joindre le serveur MySQL pour initialiser FoodLoop.', 0, $exception);
-        }
-
-        $serverConnection->exec(sprintf(
-            'CREATE DATABASE IF NOT EXISTS `%s` CHARACTER SET %s COLLATE %s',
-            $config['database'],
-            $config['charset'],
-            $config['collation']
-        ));
-
-        $databaseConnection = self::createPdo($config, true);
-        $databaseConnection->exec('SET NAMES ' . $config['charset']);
-
-        if (!self::databaseIsEmpty($databaseConnection, $config)) {
-            return;
-        }
-
-        self::runSqlFile($databaseConnection, self::schemaPath($config['driver']));
-        self::runSqlFile($databaseConnection, self::seedPath($config['driver']));
+        self::bootstrapOracle($config);
     }
 
     private static function bootstrapOracle(array $config): void
@@ -83,15 +49,6 @@ final class DatabaseBootstrapper
 
     private static function databaseIsEmpty(PDO $connection, array $config): bool
     {
-        if ($config['driver'] === 'mysql') {
-            $statement = $connection->prepare(
-                'SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = :database_name'
-            );
-            $statement->execute(['database_name' => $config['database']]);
-
-            return (int) $statement->fetchColumn() === 0;
-        }
-
         $statement = $connection->query(
             "SELECT COUNT(*) FROM user_tables WHERE table_name IN ('ROLES', 'CATEGORIES', 'UTILISATEURS')"
         );
@@ -112,21 +69,14 @@ final class DatabaseBootstrapper
         }
     }
 
-    private static function assertDatabaseName(string $databaseName): void
-    {
-        if (!preg_match('/^[A-Za-z0-9_]+$/', $databaseName)) {
-            throw new RuntimeException('Le nom du schema contient des caracteres non supportes.');
-        }
-    }
-
     private static function schemaPath(string $driver): string
     {
-        return dirname(__DIR__, 2) . '/database/' . ($driver === 'oracle' ? 'schema.oracle.sql' : 'schema.sql');
+        return dirname(__DIR__, 2) . '/database/schema.oracle.sql';
     }
 
     private static function seedPath(string $driver): string
     {
-        return dirname(__DIR__, 2) . '/database/' . ($driver === 'oracle' ? 'seed.oracle.sql' : 'seed.sql');
+        return dirname(__DIR__, 2) . '/database/seed.oracle.sql';
     }
 
     private static function splitStatements(string $sql): array
