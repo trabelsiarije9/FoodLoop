@@ -83,14 +83,10 @@ VALUES (3, 2, 3, TO_TIMESTAMP('2026-04-20 13:10:00', 'YYYY-MM-DD HH24:MI:SS'));
 INSERT INTO consultations_annonces (id_consultation, utilisateur_id, annonce_id, date_consultation)
 VALUES (4, 2, 5, TO_TIMESTAMP('2026-04-20 13:25:00', 'YYYY-MM-DD HH24:MI:SS'));
 
-INSERT INTO suggestions_ia (id, food_item_id, predicted_risk_level, predicted_expiration_probability, recommended_action, generated_at, created_at)
+INSERT INTO suggestions_ia (id, food_item_id, risk_level, exp_prob, action, gen_at, created_at)
 VALUES (1, 1, 'high', 91.50, 'Maintenir l''acces prioritaire pendant 60 minutes puis liberer automatiquement le solde aux utilisateurs.', TO_TIMESTAMP('2026-04-20 14:10:00', 'YYYY-MM-DD HH24:MI:SS'), TO_TIMESTAMP('2026-04-20 14:10:00', 'YYYY-MM-DD HH24:MI:SS'));
-INSERT INTO suggestions_ia (id, food_item_id, predicted_risk_level, predicted_expiration_probability, recommended_action, generated_at, created_at)
+INSERT INTO suggestions_ia (id, food_item_id, risk_level, exp_prob, action, gen_at, created_at)
 VALUES (2, 2, 'medium', 54.25, 'Envoyer un rappel pickup_reminder a 17h30 et proposer une remise si le stock reste incomplet.', TO_TIMESTAMP('2026-04-20 12:15:00', 'YYYY-MM-DD HH24:MI:SS'), TO_TIMESTAMP('2026-04-20 12:15:00', 'YYYY-MM-DD HH24:MI:SS'));
-INSERT INTO suggestions_ia (id, food_item_id, predicted_risk_level, predicted_expiration_probability, recommended_action, generated_at, created_at)
-VALUES (3, 3, 'high', 88.40, 'Orienter le lot vers une collecte associative multi-adresses avant 16h.', TO_TIMESTAMP('2026-04-20 13:05:00', 'YYYY-MM-DD HH24:MI:SS'), TO_TIMESTAMP('2026-04-20 13:05:00', 'YYYY-MM-DD HH24:MI:SS'));
-INSERT INTO suggestions_ia (id, food_item_id, predicted_risk_level, predicted_expiration_probability, recommended_action, generated_at, created_at)
-VALUES (4, 5, 'low', 15.00, 'Archiver la collecte comme reference positive pour les futurs lots similaires.', TO_TIMESTAMP('2026-04-20 13:20:00', 'YYYY-MM-DD HH24:MI:SS'), TO_TIMESTAMP('2026-04-20 13:20:00', 'YYYY-MM-DD HH24:MI:SS'));
 
 INSERT INTO reservations (id_reservation, annonce_id, utilisateur_id, admin_association_id, quantite_reservee, statut, date_reservation, date_pickup, created_at)
 VALUES (1, 2, 1, NULL, 2, 'completed', TO_TIMESTAMP('2026-04-20 12:50:00', 'YYYY-MM-DD HH24:MI:SS'), TO_TIMESTAMP('2026-04-20 18:20:00', 'YYYY-MM-DD HH24:MI:SS'), TO_TIMESTAMP('2026-04-20 12:50:00', 'YYYY-MM-DD HH24:MI:SS'));
@@ -140,9 +136,9 @@ VALUES (2, 1, 2, TO_TIMESTAMP('2026-04-20 18:36:00', 'YYYY-MM-DD HH24:MI:SS'));
 INSERT INTO report_consultations_commerce (id, report_id, proprietaire_id, consulted_at)
 VALUES (3, 2, 3, TO_TIMESTAMP('2026-04-20 18:45:00', 'YYYY-MM-DD HH24:MI:SS'));
 
-INSERT INTO report_consultations_super_admin (id, report_id, super_admin_id, consulted_at)
+INSERT INTO report_consult_super_admin (id, report_id, super_admin_id, consulted_at)
 VALUES (1, 1, 1, TO_TIMESTAMP('2026-04-20 18:33:00', 'YYYY-MM-DD HH24:MI:SS'));
-INSERT INTO report_consultations_super_admin (id, report_id, super_admin_id, consulted_at)
+INSERT INTO report_consult_super_admin (id, report_id, super_admin_id, consulted_at)
 VALUES (2, 2, 1, TO_TIMESTAMP('2026-04-20 18:43:00', 'YYYY-MM-DD HH24:MI:SS'));
 
 INSERT INTO notifications (id_notification, utilisateur_id, admin_association_id, proprietaire_id, annonce_id, reservation_id, report_id, message_notification, type, channel, sent_at, read_at, status, created_at)

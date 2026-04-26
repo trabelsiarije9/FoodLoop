@@ -292,7 +292,7 @@ final class PlatformRepository
         $sql = <<<SQL
             SELECT
                 s.id AS id_ia,
-                s.recommended_action AS message,
+                s.action AS message,
                 a.titre AS annonce_titre,
                 p.nom_commerce,
                 (
@@ -325,7 +325,7 @@ final class PlatformRepository
             );
         }
 
-        $sql .= ' ORDER BY s.generated_at DESC';
+        $sql .= ' ORDER BY s.gen_at DESC';
         $sql = $this->limitSql($sql, 4);
 
         $statement = $this->connection->prepare($sql);
@@ -353,7 +353,7 @@ final class PlatformRepository
                     ) AS lectures_commerce,
                     (
                         SELECT COUNT(*)
-                        FROM report_consultations_super_admin rs
+                        FROM report_consult_super_admin rs
                         WHERE rs.report_id = r.id
                     ) AS lectures_super_admin
                 FROM reports r
