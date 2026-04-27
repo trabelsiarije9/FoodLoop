@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FoodLoop | Superadmin Dashboard</title>
+    <meta name="description" content="Dashboard superadmin FoodLoop pour piloter acheteurs, commerces, associations, signalements et systeme.">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body class="dashboard-body">
+    <div id="superadminDashboard" class="dashboard-shell">
+        <header class="dashboard-topbar dashboard-topbar-admin">
+            <div class="dashboard-logo">
+                <div class="dashboard-logo-mark">SA</div>
+                <strong>SUPERADMIN</strong>
+            </div>
+
+            <div class="dashboard-actions">
+                <button id="superadminNotificationsButton" class="icon-button" type="button" aria-label="Notifications">
+                    <span>&#128276;</span>
+                    <strong id="superadminNotificationCount" class="icon-badge">0</strong>
+                </button>
+                <button id="superadminProfileButton" class="icon-button" type="button" aria-label="Profil">
+                    <span>&#128100;</span>
+                    <span class="logout-label">Profile</span>
+                </button>
+                <button id="superadminLogoutButton" class="icon-button logout-button" type="button" aria-label="Se deconnecter">
+                    <span>&#128682;</span>
+                    <span class="logout-label">Logout</span>
+                </button>
+            </div>
+        </header>
+
+        <main class="dashboard-layout">
+            <aside class="dashboard-sidebar">
+                <section class="profile-card">
+                    <div class="profile-avatar">SA</div>
+                    <div>
+                        <strong>Superadmin FoodLoop</strong>
+                        <p>Controle systeme</p>
+                    </div>
+                </section>
+
+                <nav class="sidebar-nav" aria-label="Menu superadmin">
+                    <button class="sidebar-link is-active" type="button" data-superadmin-view="global">Dashboard global</button>
+                    <button class="sidebar-link" type="button" data-superadmin-view="buyers">Acheteurs</button>
+                    <button class="sidebar-link" type="button" data-superadmin-view="commerces">Commerces</button>
+                    <button class="sidebar-link" type="button" data-superadmin-view="associations">Associations</button>
+                    <button class="sidebar-link" type="button" data-superadmin-view="reports">Signalements</button>
+                    <button class="sidebar-link" type="button" data-superadmin-view="system">Systeme</button>
+                </nav>
+            </aside>
+
+            <section class="dashboard-main">
+                <div class="dashboard-main-header">
+                    <div>
+                        <p id="superadminViewKicker" class="dashboard-kicker">Pilotage global</p>
+                        <h1 id="superadminViewTitle">Dashboard global</h1>
+                    </div>
+                    <p id="superadminViewDescription" class="dashboard-description">
+                        Suivez l'activite de la plateforme, moderez les comptes et supervisez les signalements depuis un seul espace.
+                    </p>
+                </div>
+
+                <div id="superadminDashboardContent" class="dashboard-content"></div>
+            </section>
+        </main>
+    </div>
+
+    <div id="superadminDashboardPanel" class="dashboard-panel" aria-hidden="true">
+        <div class="dashboard-panel-backdrop" data-close-superadmin-panel="true"></div>
+        <div class="dashboard-panel-card">
+            <div class="panel-header">
+                <strong id="superadminPanelTitle">Panneau</strong>
+                <button class="panel-close" type="button" data-close-superadmin-panel="true">&times;</button>
+            </div>
+            <div id="superadminPanelContent" class="panel-content"></div>
+        </div>
+    </div>
+
+    <script src="https://cdn.canvasjs.com/canvasjs.min.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>

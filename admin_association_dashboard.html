@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FoodLoop | Dashboard Admin Association</title>
+    <meta name="description" content="Dashboard admin association FoodLoop avec reservations, offres exclusives et panier partage vers le paiement.">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body class="dashboard-body">
+    <div id="adminAssociationDashboard" class="dashboard-shell">
+        <header class="dashboard-topbar">
+            <div class="dashboard-logo">
+                <div class="dashboard-logo-mark">FL</div>
+                <strong>FoodLoop</strong>
+            </div>
+
+            <label class="dashboard-search global-search" for="adminDashboardSearch">
+                <span>&#8981;</span>
+                <input id="adminDashboardSearch" type="search" placeholder="Rechercher un produit..." autocomplete="off">
+            </label>
+
+            <div class="dashboard-actions">
+                <button id="adminCartButton" class="icon-button" type="button" aria-label="Panier">
+                    <span>&#128722;</span>
+                    <strong id="adminCartCount" class="icon-badge">0</strong>
+                </button>
+                <button id="adminNotificationsButton" class="icon-button" type="button" aria-label="Notifications">
+                    <span>&#128276;</span>
+                    <strong id="adminNotificationCount" class="icon-badge">0</strong>
+                </button>
+                <button id="adminLogoutButton" class="icon-button logout-button" type="button" aria-label="Se deconnecter">
+                    <span>&#128682;</span>
+                    <span class="logout-label">Logout</span>
+                </button>
+            </div>
+        </header>
+
+        <main class="dashboard-layout">
+            <aside class="dashboard-sidebar">
+                <section class="profile-card">
+                    <div class="profile-avatar">AA</div>
+                    <div>
+                        <strong id="adminAssociationName">Association Nourrir Demain</strong>
+                        <p id="adminAssociationZone">Tunis Centre</p>
+                    </div>
+                </section>
+
+                <nav class="sidebar-nav" aria-label="Menu admin association">
+                    <button class="sidebar-link is-active" type="button" data-admin-view="products">Profile</button>
+                    <button class="sidebar-link" type="button" data-admin-view="reservations">Mes reservations</button>
+                    <button class="sidebar-link" type="button" data-admin-view="recommendations">Recommandations</button>
+                    <button class="sidebar-link" type="button" data-admin-view="nearby">Produits proches</button>
+                    <button class="sidebar-link" type="button" data-admin-view="history">Historique des reservations</button>
+                    <button class="sidebar-link sidebar-link-premium" type="button" data-admin-view="offers">Offres associations</button>
+                </nav>
+
+                <section class="association-offers-card">
+                    <p class="dashboard-kicker">Offres et reductions reservees aux associations</p>
+                    <h2>Acces prioritaire aux collectes a fort volume</h2>
+                    <p>Profitez de remises solidaires, de creneaux etendus et de lots reserves aux structures partenaires.</p>
+                </section>
+            </aside>
+
+            <section class="dashboard-main">
+                <div class="dashboard-main-header">
+                    <div>
+                        <p id="adminViewKicker" class="dashboard-kicker">Feed association</p>
+                        <h1 id="adminViewTitle">Produits disponibles pour votre association</h1>
+                    </div>
+                    <p id="adminViewDescription" class="dashboard-description">
+                        Recherchez, filtrez et reservez des lots adaptes a vos besoins, avec gestion de quantite avant paiement.
+                    </p>
+                </div>
+
+                <div id="adminFeedControls" class="feed-controls">
+                    <label class="dashboard-search feed-search" for="adminFeedSearch">
+                        <span>&#8981;</span>
+                        <input id="adminFeedSearch" type="search" placeholder="Rechercher dans le feed..." autocomplete="off">
+                    </label>
+
+                    <div class="feed-filters">
+                        <label class="filter-pill" for="adminZone">
+                            <span>Zone</span>
+                            <select id="adminZone">
+                                <option value="">Toutes</option>
+                            </select>
+                        </label>
+
+                        <label class="filter-pill" for="adminCategory">
+                            <span>Categorie</span>
+                            <select id="adminCategory">
+                                <option value="">Toutes</option>
+                            </select>
+                        </label>
+
+                        <label class="filter-pill" for="adminDistance">
+                            <span>Distance</span>
+                            <select id="adminDistance">
+                                <option value="">Toutes</option>
+                                <option value="2">Moins de 2 km</option>
+                                <option value="5">Moins de 5 km</option>
+                                <option value="10">Moins de 10 km</option>
+                                <option value="20">Moins de 20 km</option>
+                            </select>
+                        </label>
+                    </div>
+                </div>
+
+                <div id="adminDashboardContent" class="dashboard-content"></div>
+            </section>
+        </main>
+    </div>
+
+    <div id="adminDashboardPanel" class="dashboard-panel" aria-hidden="true">
+        <div class="dashboard-panel-backdrop" data-close-admin-panel="true"></div>
+        <div class="dashboard-panel-card">
+            <div class="panel-header">
+                <strong id="adminPanelTitle">Panneau</strong>
+                <button class="panel-close" type="button" data-close-admin-panel="true">×</button>
+            </div>
+            <div id="adminPanelContent" class="panel-content"></div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>

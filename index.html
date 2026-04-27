@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FoodLoop | Marketplace solidaire</title>
+    <meta name="description" content="FoodLoop, marketplace solidaire pour reduire le gaspillage alimentaire et valoriser les excedents en temps reel.">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="page-shell">
+        <header class="site-header">
+            <div class="logo-block" aria-label="Logo FoodLoop">
+                <div class="logo-mark">FL</div>
+                <div class="logo-text">
+                    <strong>FoodLoop</strong>
+                    <span>Marketplace solidaire</span>
+                </div>
+            </div>
+
+            <form class="search-form" role="search">
+                <label class="search-field" for="searchInput">
+                    <span class="search-icon" aria-hidden="true">&#8981;</span>
+                    <input id="searchInput" type="search" placeholder="Rechercher un produit..." autocomplete="off">
+                </label>
+            </form>
+
+            <nav class="auth-nav" aria-label="Navigation utilisateur">
+                <a href="login_signup.html">Se connecter</a>
+                <a class="signup-link" href="login_signup.html">S'inscrire</a>
+            </nav>
+        </header>
+
+        <main>
+            <section class="hero-section">
+                <div class="hero-card">
+                    <p class="hero-kicker">Plateforme anti-gaspillage</p>
+                    <h1>Moins de gaspillage, plus de solidarit&eacute;.</h1>
+                    <p class="hero-description">
+                        FoodLoop facilite la mise en relation entre commerces alimentaires, associations et utilisateurs pour valoriser les excedents en temps reel.
+                    </p>
+                </div>
+            </section>
+
+            <section class="filters-section">
+                <div class="filters-bar">
+                    <label class="filter-control" for="zoneFilter">
+                        <span>Zone</span>
+                        <select id="zoneFilter">
+                            <option value="">Toutes les zones</option>
+                        </select>
+                    </label>
+
+                    <label class="filter-control" for="typeFilter">
+                        <span>Type</span>
+                        <select id="typeFilter">
+                            <option value="">Tous les types</option>
+                        </select>
+                    </label>
+
+                    <label class="filter-control" for="distanceFilter">
+                        <span>Distance</span>
+                        <select id="distanceFilter">
+                            <option value="">Toutes distances</option>
+                            <option value="2">Moins de 2 km</option>
+                            <option value="5">Moins de 5 km</option>
+                            <option value="10">Moins de 10 km</option>
+                            <option value="20">Moins de 20 km</option>
+                        </select>
+                    </label>
+                </div>
+            </section>
+
+            <section class="products-section">
+                <div class="section-heading">
+                    <div>
+                        <p class="section-kicker">Disponibles maintenant</p>
+                        <h2>Des excedents accessibles en quelques clics</h2>
+                    </div>
+                    <p id="resultsCount" class="results-count" aria-live="polite"></p>
+                </div>
+
+                <div id="productsGrid" class="products-grid"></div>
+
+                <div class="actions-row">
+                    <button id="loadMoreButton" class="load-more-button" type="button">Voir plus</button>
+                </div>
+            </section>
+        </main>
+
+        <footer class="site-footer" aria-label="Liens de bas de page">
+            <div class="site-footer-links">
+                <span>A propos</span>
+                <span>Contact</span>
+                <span>CGU</span>
+                <span>Confidentialite</span>
+            </div>
+            <div class="site-footer-admin">
+                <a class="site-footer-admin-link" href="admin_access.html">Administration</a>
+            </div>
+        </footer>
+    </div>
+
+    <div id="reservationModal" class="modal" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+        <div class="modal-backdrop" data-close-modal="true"></div>
+        <div class="modal-panel">
+            <button class="modal-close" type="button" aria-label="Fermer" data-close-modal="true">&times;</button>
+            <p class="modal-kicker">Reservation</p>
+            <h3 id="modalTitle">Produit selectionne</h3>
+            <p id="modalDescription" class="modal-description"></p>
+            <button id="modalActionButton" class="reserve-button" type="button">R&eacute;server</button>
+        </div>
+    </div>
+
+    <div id="authRequiredModal" class="auth-required-modal" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="authRequiredTitle">
+        <div class="auth-required-backdrop" data-close-auth-modal="true"></div>
+        <div class="auth-required-card">
+            <button class="auth-required-close" type="button" aria-label="Fermer" data-close-auth-modal="true">&times;</button>
+            <p class="auth-required-kicker">Action requise</p>
+            <h3 id="authRequiredTitle">You must be logged in or signed up to make a reservation.</h3>
+            <div class="auth-required-actions">
+                <a class="auth-required-button auth-required-primary" href="login_signup.html">Se connecter</a>
+                <a class="auth-required-button auth-required-secondary" href="login_signup.html">S'inscrire</a>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>

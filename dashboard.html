@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FoodLoop | Dashboard Acheteur</title>
+    <meta name="description" content="Dashboard acheteur FoodLoop avec feed produits, reservations, recommandations et notifications.">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body class="dashboard-body">
+    <div id="buyerDashboard" class="dashboard-shell">
+        <header class="dashboard-topbar">
+            <div class="dashboard-logo">
+                <div class="dashboard-logo-mark">FL</div>
+                <strong>FoodLoop</strong>
+            </div>
+
+            <label class="dashboard-search global-search" for="dashboardSearch">
+                <span>&#8981;</span>
+                <input id="dashboardSearch" type="search" placeholder="Rechercher un produit..." autocomplete="off">
+            </label>
+
+            <div class="dashboard-actions">
+                <button id="cartButton" class="icon-button" type="button" aria-label="Panier">
+                    <span>&#128722;</span>
+                    <strong id="cartCount" class="icon-badge">0</strong>
+                </button>
+                <button id="notificationsButton" class="icon-button" type="button" aria-label="Notifications">
+                    <span>&#128276;</span>
+                    <strong id="notificationCount" class="icon-badge">0</strong>
+                </button>
+                <button id="logoutButton" class="icon-button logout-button" type="button" aria-label="Se deconnecter">
+                    <span>&#128682;</span>
+                    <span class="logout-label">Logout</span>
+                </button>
+            </div>
+        </header>
+
+        <main class="dashboard-layout">
+            <aside class="dashboard-sidebar">
+                <section class="profile-card">
+                    <div class="profile-avatar">A</div>
+                    <div>
+                        <strong id="buyerName">Amal Ben Ali</strong>
+                        <p id="buyerZone">Tunis Centre</p>
+                    </div>
+                </section>
+
+                <nav class="sidebar-nav" aria-label="Menu acheteur">
+                    <button class="sidebar-link is-active" type="button" data-view="profile">Profile</button>
+                    <button class="sidebar-link" type="button" data-view="reservations">Mes r&eacute;servations</button>
+                    <button class="sidebar-link" type="button" data-view="recommendations">Recommandations</button>
+                    <button class="sidebar-link" type="button" data-view="nearby">Produits proches</button>
+                    <button class="sidebar-link" type="button" data-view="history">Historique des r&eacute;servations</button>
+                </nav>
+            </aside>
+
+            <section class="dashboard-main">
+                <div class="dashboard-main-header">
+                    <div>
+                        <p id="viewKicker" class="dashboard-kicker">Feed acheteur</p>
+                        <h1 id="viewTitle">Produits recommand&eacute;s pour vous</h1>
+                    </div>
+                    <p id="viewDescription" class="dashboard-description">
+                        Retrouvez les annonces les plus pertinentes selon votre zone et vos preferences.
+                    </p>
+                </div>
+
+                <div id="feedControls" class="feed-controls">
+                    <label class="dashboard-search feed-search" for="feedSearch">
+                        <span>&#8981;</span>
+                        <input id="feedSearch" type="search" placeholder="Rechercher dans le feed..." autocomplete="off">
+                    </label>
+
+                    <div class="feed-filters">
+                        <label class="filter-pill" for="dashboardZone">
+                            <span>Zone</span>
+                            <select id="dashboardZone">
+                                <option value="">Toutes</option>
+                            </select>
+                        </label>
+
+                        <label class="filter-pill" for="dashboardCategory">
+                            <span>Cat&eacute;gorie</span>
+                            <select id="dashboardCategory">
+                                <option value="">Toutes</option>
+                            </select>
+                        </label>
+
+                        <label class="filter-pill" for="dashboardDistance">
+                            <span>Distance</span>
+                            <select id="dashboardDistance">
+                                <option value="">Toutes</option>
+                                <option value="2">Moins de 2 km</option>
+                                <option value="5">Moins de 5 km</option>
+                                <option value="10">Moins de 10 km</option>
+                                <option value="20">Moins de 20 km</option>
+                            </select>
+                        </label>
+                    </div>
+                </div>
+
+                <div id="dashboardContent" class="dashboard-content"></div>
+            </section>
+        </main>
+    </div>
+
+    <div id="dashboardPanel" class="dashboard-panel" aria-hidden="true">
+        <div class="dashboard-panel-backdrop" data-close-panel="true"></div>
+        <div class="dashboard-panel-card">
+            <div class="panel-header">
+                <strong id="panelTitle">Panneau</strong>
+                <button class="panel-close" type="button" data-close-panel="true">&times;</button>
+            </div>
+            <div id="panelContent" class="panel-content"></div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>

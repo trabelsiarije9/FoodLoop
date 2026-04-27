@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FoodLoop | Dashboard Proprietaire Commerce</title>
+    <meta name="description" content="Dashboard proprietaire commerce FoodLoop pour publier des annonces, suivre les reservations et consulter les rapports.">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body class="dashboard-body">
+    <div id="merchantDashboard" class="dashboard-shell">
+        <header class="dashboard-topbar dashboard-topbar-compact">
+            <div class="dashboard-logo">
+                <div class="dashboard-logo-mark">FL</div>
+                <strong>FoodLoop</strong>
+            </div>
+
+            <div class="dashboard-actions">
+                <button id="merchantNotificationsButton" class="icon-button" type="button" aria-label="Notifications">
+                    <span>&#128276;</span>
+                    <strong id="merchantNotificationCount" class="icon-badge">0</strong>
+                </button>
+                <button id="merchantLogoutButton" class="icon-button logout-button" type="button" aria-label="Se deconnecter">
+                    <span>&#128682;</span>
+                    <span class="logout-label">Logout</span>
+                </button>
+            </div>
+        </header>
+
+        <main class="dashboard-layout">
+            <aside class="dashboard-sidebar">
+                <section class="profile-card">
+                    <div class="profile-avatar">PC</div>
+                    <div>
+                        <strong>Maison du Marche</strong>
+                        <p>Tunis Centre</p>
+                    </div>
+                </section>
+
+                <nav class="sidebar-nav" aria-label="Menu proprietaire commerce">
+                    <button class="sidebar-link is-active" type="button" data-merchant-view="publish">Publier une annonce</button>
+                    <button class="sidebar-link" type="button" data-merchant-view="products">Tes annonces</button>
+                    <button class="sidebar-link" type="button" data-merchant-view="history">Historique des annonces</button>
+                    <button class="sidebar-link" type="button" data-merchant-view="reports">Reports</button>
+                </nav>
+            </aside>
+
+            <section class="dashboard-main">
+                <div class="dashboard-main-header">
+                    <div>
+                        <p id="merchantViewKicker" class="dashboard-kicker">Publication</p>
+                        <h1 id="merchantViewTitle">Publication d'une annonce</h1>
+                    </div>
+                    <p id="merchantViewDescription" class="dashboard-description">
+                        Publiez des lots, suivez les reservations actives et consultez les performances de votre commerce.
+                    </p>
+                </div>
+
+                <div id="merchantDashboardContent" class="dashboard-content"></div>
+            </section>
+        </main>
+    </div>
+
+    <div id="merchantDashboardPanel" class="dashboard-panel" aria-hidden="true">
+        <div class="dashboard-panel-backdrop" data-close-merchant-panel="true"></div>
+        <div class="dashboard-panel-card">
+            <div class="panel-header">
+                <strong id="merchantPanelTitle">Panneau</strong>
+                <button class="panel-close" type="button" data-close-merchant-panel="true">&times;</button>
+            </div>
+            <div id="merchantPanelContent" class="panel-content"></div>
+        </div>
+    </div>
+
+    <script src="https://cdn.canvasjs.com/canvasjs.min.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>

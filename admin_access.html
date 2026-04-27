@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FoodLoop | Acces Administrateur</title>
+    <meta name="description" content="Page d'acces securise au dashboard superadmin FoodLoop.">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body class="admin-access-body">
+    <main id="adminAccessApp" class="admin-access-page">
+        <section class="admin-access-shell">
+            <div class="admin-access-card">
+                <div class="admin-access-header">
+                    <p class="admin-access-kicker">Acces securise</p>
+                    <h1>Acces Administrateur</h1>
+                </div>
+                <form id="adminAccessForm" class="admin-access-form">
+                    <label class="admin-access-field" for="adminCodeInput">
+                        <span>Code d'acces</span>
+                        <input id="adminCodeInput" type="password" name="adminCode" placeholder="Entrez le code" autocomplete="off" required>
+                    </label>
+                    <button class="admin-access-button" type="submit">Valider</button>
+                    <p id="adminAccessMessage" class="admin-access-message" aria-live="polite"></p>
+                </form>
+            </div>
+        </section>
+    </main>
+
+    <script src="script.js"></script>
+</body>
+</html>
