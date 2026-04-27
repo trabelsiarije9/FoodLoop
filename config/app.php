@@ -5,11 +5,13 @@ declare(strict_types=1);
 return [
     'app_name' => 'FoodLoop',
     'db' => [
-        'host' => '127.0.0.1',
-        'port' => '3306',
+        'driver' => 'oci',
+        'host' => 'localhost',
+        'port' => '1521',
+        'service_name' => 'XE',
         'name' => 'foodloop',
-        'user' => 'root',
-        'password' => '',
-        'charset' => 'utf8mb4',
+        'user' => 'FOODLOOP_USER',
+        'password' => 'password',
+        'charset' => 'AL32UTF8',
     ],
 ];

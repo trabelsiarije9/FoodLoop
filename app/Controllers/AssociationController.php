@@ -58,7 +58,7 @@ final class AssociationController extends Controller
             'navigation' => HomeController::privateNavigation(),
             'flashMessages' => pull_flashes(),
             'user' => Auth::user(),
-            'reservations' => (new ReservationModel())->allForUser((int) Auth::id()),
+            'reservations' => (new ReservationModel())->allForAssociation((int) Auth::id()),
         ]);
     }
 
@@ -79,7 +79,7 @@ final class AssociationController extends Controller
 
         (new ReservationModel())->create([
             'food_item_id' => $itemId,
-            'user_id' => (int) Auth::id(),
+            'user_id' => null,
             'organization_id' => (int) $organization['id'],
             'reserved_quantity' => max(1, $quantity),
             'status' => 'pending',

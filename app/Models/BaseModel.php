@@ -19,9 +19,15 @@ abstract class BaseModel
     protected function requireDb(): PDO
     {
         if (!$this->db instanceof PDO) {
-            throw new \RuntimeException('Connexion MySQL indisponible.');
+            throw new \RuntimeException('Connexion base de donnees indisponible.');
         }
 
         return $this->db;
+    }
+
+    protected function nextId(string $table, string $column): int
+    {
+        $stmt = $this->requireDb()->query("SELECT COALESCE(MAX({$column}), 0) + 1 AS NEXT_ID FROM {$table}");
+        return (int) $stmt->fetchColumn();
     }
 }

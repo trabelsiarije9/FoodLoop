@@ -121,7 +121,7 @@ final class HomeModel
             'steps' => [
                 'Definir le type d’acteur a onboarder.',
                 'Choisir les modules prioritaires.',
-                'Connecter la base MySQL et les vues MVC.',
+                'Connecter la base Oracle et les vues MVC.',
             ],
         ];
     }
