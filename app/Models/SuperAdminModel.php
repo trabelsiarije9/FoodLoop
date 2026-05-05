@@ -23,6 +23,37 @@ final class SuperAdminModel extends BaseModel
         return $this->moderationTableExists;
     }
 
+    public function ensureModerationTable(): void
+    {
+        if ($this->moderationTableExists()) {
+            return;
+        }
+
+        $migrationPath = BASE_PATH . '/database/migrations/2026-05-04_add_account_moderation.sql';
+        if (!is_file($migrationPath)) {
+            throw new RuntimeException('Migration ACCOUNT_MODERATION introuvable.');
+        }
+
+        $sql = trim((string) file_get_contents($migrationPath));
+        if ($sql === '') {
+            throw new RuntimeException('Migration ACCOUNT_MODERATION vide.');
+        }
+
+        try {
+            $this->pdo->exec($sql);
+        } catch (\Throwable $exception) {
+            if (!$this->moderationTableExists()) {
+                throw new RuntimeException(
+                    'Impossible de creer la table ACCOUNT_MODERATION automatiquement. Verifiez les droits Oracle du schema FOODLOOP.',
+                    0,
+                    $exception
+                );
+            }
+        }
+
+        $this->moderationTableExists = true;
+    }
+
     public function isSuspended(int $userId): bool
     {
         if ($userId <= 0 || !$this->moderationTableExists()) {
@@ -42,6 +73,8 @@ final class SuperAdminModel extends BaseModel
 
     public function getDashboardPayload(): array
     {
+        $this->ensureModerationTable();
+
         $buyers = $this->listBuyers();
         $commerces = $this->listCommerces();
         $associations = $this->listAssociations();
@@ -163,10 +196,7 @@ final class SuperAdminModel extends BaseModel
     public function suspendAccount(int $userId, string $reason = ''): void
     {
         $this->assertUserExists($userId);
-
-        if (!$this->moderationTableExists()) {
-            throw new RuntimeException('La table ACCOUNT_MODERATION est absente. Lancez la migration superadmin.');
-        }
+        $this->ensureModerationTable();
 
         $stmt = $this->pdo->prepare('
             MERGE INTO ACCOUNT_MODERATION m

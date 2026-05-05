@@ -14,9 +14,7 @@ const checkoutReturnKey = 'foodloopCheckoutReturnPage';
 const annonceStockOverridesKey = 'foodloopAnnonceStockOverrides';
 const reservationEventStorageKey = 'foodloopReservationEvent';
 const superadminRoleKey = 'role';
-const ADMIN_CODE = 'FOODLOOP-ADMIN-2026';
 const currentUserStorageKey = 'currentUser';
-const usersStorageKey = 'foodloopUsers';
 const apiEndpoints = {
     signup: 'signup.php',
     login: 'login.php',
@@ -28,11 +26,6 @@ const apiEndpoints = {
     createProduct: 'create_product.php',
     annonces: 'annonces.php'
 };
-const defaultUsers = [
-    { email: 'test@user.com', password: '1234', role: 'acheteur' },
-    { email: 'admin@assoc.com', password: '1234', role: 'admin_association' },
-    { email: 'shop@store.com', password: '1234', role: 'commerce' }
-];
 const pageRoutes = {
     home: 'index.php?route=home',
     login: 'index.php?route=login',
@@ -50,16 +43,6 @@ const roleRoutes = {
     commerce: pageRoutes.business,
     superadmin: pageRoutes.admin
 };
-
-function getStoredUsers() {
-    const storedUsers = loadStoredArray(usersStorageKey);
-    if (storedUsers.length === 0) {
-        persistStoredArray(usersStorageKey, defaultUsers);
-        return [...defaultUsers];
-    }
-
-    return storedUsers;
-}
 
 function getCurrentUser() {
     try {
@@ -292,57 +275,6 @@ function recordBelongsToUser(record, user = getCurrentUser()) {
 function loadOwnedScopedArray(baseKey, fallback = [], user = getCurrentUser()) {
     const scopedItems = loadScopedArray(baseKey, fallback, user);
     return scopedItems.filter((item) => recordBelongsToUser(item, user));
-}
-
-function isOracleUnavailableMessage(message) {
-    return typeof message === 'string' && message.toLowerCase().includes('oracle');
-}
-
-function buildLocalUserId(email) {
-    const users = getStoredUsers();
-    const index = users.findIndex((user) => String(user.email || '').toLowerCase() === String(email || '').toLowerCase());
-    return index >= 0 ? index + 1 : Date.now();
-}
-
-function loginWithLocalFallback(email, password) {
-    const users = getStoredUsers();
-    const matchedUser = users.find((user) => {
-        return String(user.email || '').toLowerCase() === String(email || '').toLowerCase()
-            && String(user.password || '') === String(password || '');
-    });
-
-    if (!matchedUser) {
-        throw new Error('Identifiants invalides.');
-    }
-
-    return {
-        status: 'success',
-        role: matchedUser.role,
-        user_id: buildLocalUserId(email),
-        fallback: true
-    };
-}
-
-function signupWithLocalFallback(email, password, role) {
-    const users = getStoredUsers();
-    const normalizedEmail = String(email || '').trim().toLowerCase();
-
-    if (users.some((user) => String(user.email || '').toLowerCase() === normalizedEmail)) {
-        throw new Error('Un compte existe deja avec cet email.');
-    }
-
-    users.push({
-        email: normalizedEmail,
-        password: String(password || ''),
-        role: String(role || 'acheteur')
-    });
-
-    persistStoredArray(usersStorageKey, users);
-
-    return {
-        status: 'success',
-        fallback: true
-    };
 }
 
 function setCheckoutState(cartItems, returnPage) {
@@ -1418,24 +1350,13 @@ if (authApp) {
         if (action === 'login') {
             const formData = new FormData(form);
             const email = String(formData.get('email') || '').trim().toLowerCase();
-            const password = String(formData.get('password') || '');
             authState.isSubmitting = true;
             authState.errorMessage = '';
             authState.successMessage = '';
             renderAuthApp();
 
             try {
-                let payload;
-
-                try {
-                    payload = await postToPhpEndpoint(apiEndpoints.login, formData);
-                } catch (error) {
-                    if (!(error instanceof Error) || !isOracleUnavailableMessage(error.message)) {
-                        throw error;
-                    }
-
-                    payload = loginWithLocalFallback(email, password);
-                }
+                const payload = await postToPhpEndpoint(apiEndpoints.login, formData);
 
                 const connectedUser = {
                     id: payload.user_id,
@@ -1445,7 +1366,7 @@ if (authApp) {
                 };
                 setCurrentUser(connectedUser);
                 authState.isSubmitting = false;
-                authState.successMessage = payload.fallback ? 'Connexion effectuee en mode local.' : '';
+                authState.successMessage = '';
                 redirectToRoleHome(payload.role);
             } catch (error) {
                 authState.isSubmitting = false;
@@ -1506,17 +1427,8 @@ if (authApp) {
             renderAuthApp();
 
             try {
-                try {
-                    await postToPhpEndpoint(apiEndpoints.signup, signupFormData);
-                    authState.successMessage = 'Compte cree avec succes. Connectez-vous maintenant.';
-                } catch (error) {
-                    if (!(error instanceof Error) || !isOracleUnavailableMessage(error.message)) {
-                        throw error;
-                    }
-
-                    signupWithLocalFallback(email, String(localFormData.get('password') || ''), authState.role);
-                    authState.successMessage = 'Compte cree en mode local. Connectez-vous maintenant.';
-                }
+                await postToPhpEndpoint(apiEndpoints.signup, signupFormData);
+                authState.successMessage = 'Compte cree avec succes. Connectez-vous maintenant.';
 
                 authState.isSubmitting = false;
                 authState.errorMessage = '';
