@@ -1,172 +1,204 @@
 <?php
-
 declare(strict_types=1);
 
 namespace App\Controllers;
 
-use App\Core\Auth;
 use App\Core\Controller;
+use App\Models\SuperAdminModel;
 use App\Models\UserModel;
+use RuntimeException;
 
 final class AuthController extends Controller
 {
-    public function login(): string
+    public function sessionStatus(): never
     {
-        if (Auth::check()) {
-            redirect('dashboard');
+        $this->startSession();
+
+        if (isset($_SESSION['foodloop_superadmin']) && $_SESSION['foodloop_superadmin'] === true) {
+            $this->json(200, [
+                'status' => 'success',
+                'authenticated' => true,
+                'user' => [
+                    'id' => 1,
+                    'role' => 'superadmin',
+                    'email' => 'superadmin@foodloop.local',
+                    'name' => (string) ($_SESSION['foodloop_superadmin_name'] ?? 'Superadmin FoodLoop'),
+                ],
+            ]);
         }
 
-        return $this->render('auth/login', [
-            'title' => 'Connexion | FoodLoop',
-            'description' => 'Connectez-vous a votre espace FoodLoop.',
-            'currentPage' => 'login',
-            'navigation' => HomeController::publicNavigation(),
-            'flashMessages' => pull_flashes(),
-            'user' => null,
+        if (!isset($_SESSION['foodloop_user_id'], $_SESSION['foodloop_role'])) {
+            $this->json(401, [
+                'status' => 'error',
+                'message' => 'Utilisateur non connecte.',
+                'authenticated' => false,
+            ]);
+        }
+
+        $userId = (int) $_SESSION['foodloop_user_id'];
+        if ((new SuperAdminModel())->isSuspended($userId)) {
+            $_SESSION = [];
+            session_destroy();
+            $this->json(403, [
+                'status' => 'error',
+                'message' => 'Ce compte est suspendu. Contactez le superadmin.',
+                'authenticated' => false,
+            ]);
+        }
+
+        $this->json(200, [
+            'status' => 'success',
+            'authenticated' => true,
+            'user' => [
+                'id' => (int) $_SESSION['foodloop_user_id'],
+                'role' => (string) $_SESSION['foodloop_role'],
+                'email' => (string) ($_SESSION['foodloop_email'] ?? ''),
+                'name' => (string) ($_SESSION['foodloop_name'] ?? ''),
+            ],
         ]);
     }
 
-    public function loginSubmit(): string
+    public function loginSubmit(): never
     {
-        $this->requireCsrf();
+        $this->requirePost();
+        $this->startSession();
 
-        $email = trim((string) ($_POST['email'] ?? ''));
+        $email = strtolower(trim((string) ($_POST['email'] ?? '')));
         $password = (string) ($_POST['password'] ?? '');
-        store_old_input(['email' => $email]);
 
         if ($email === '' || $password === '') {
-            flash('error', 'Email et mot de passe obligatoires.');
-            redirect('login');
+            $this->json(422, ['status' => 'error', 'message' => 'Email et mot de passe obligatoires.']);
         }
 
-        if (!Auth::attempt($email, $password)) {
-            flash('error', 'Identifiants invalides ou compte inactif.');
-            redirect('login');
-        }
-
-        clear_old_input();
-        flash('success', 'Connexion reussie.');
-        redirect('dashboard');
-    }
-
-    public function register(): string
-    {
-        if (Auth::check()) {
-            redirect('dashboard');
-        }
-
-        return $this->render('auth/register', [
-            'title' => 'Creer un compte | FoodLoop',
-            'description' => 'Inscription user simple, association ou business owner sur FoodLoop.',
-            'currentPage' => 'register',
-            'navigation' => HomeController::publicNavigation(),
-            'flashMessages' => pull_flashes(),
-            'user' => null,
-        ]);
-    }
-
-    public function registerSubmit(): string
-    {
-        $this->requireCsrf();
-
-        $data = [
-            'first_name' => trim((string) ($_POST['first_name'] ?? '')),
-            'last_name' => trim((string) ($_POST['last_name'] ?? '')),
-            'email' => trim((string) ($_POST['email'] ?? '')),
-            'phone' => trim((string) ($_POST['phone'] ?? '')),
-            'password' => (string) ($_POST['password'] ?? ''),
-            'password_confirmation' => (string) ($_POST['password_confirmation'] ?? ''),
-            'role_code' => (string) ($_POST['role_code'] ?? 'regular_user'),
-            'organization_name' => trim((string) ($_POST['organization_name'] ?? '')),
-            'organization_description' => trim((string) ($_POST['organization_description'] ?? '')),
-            'business_license' => trim((string) ($_POST['business_license'] ?? '')),
-            'association_code' => trim((string) ($_POST['association_code'] ?? '')),
-            'address_line' => trim((string) ($_POST['address_line'] ?? '')),
-            'city' => trim((string) ($_POST['city'] ?? '')),
-            'governorate' => trim((string) ($_POST['governorate'] ?? '')),
-        ];
-
-        if ($data['role_code'] === 'association_admin') {
-            $data['organization_name'] = $data['organization_name'] !== '' ? $data['organization_name'] : trim((string) ($_POST['association_organization_name'] ?? ''));
-            $data['organization_description'] = $data['organization_description'] !== '' ? $data['organization_description'] : trim((string) ($_POST['association_organization_description'] ?? ''));
-            $data['address_line'] = $data['address_line'] !== '' ? $data['address_line'] : trim((string) ($_POST['association_address_line'] ?? ''));
-            $data['city'] = $data['city'] !== '' ? $data['city'] : trim((string) ($_POST['association_city'] ?? ''));
-            $data['governorate'] = $data['governorate'] !== '' ? $data['governorate'] : trim((string) ($_POST['association_governorate'] ?? ''));
-        }
-
-        if ($data['role_code'] === 'business_owner') {
-            $data['organization_name'] = $data['organization_name'] !== '' ? $data['organization_name'] : trim((string) ($_POST['business_organization_name'] ?? ''));
-            $data['organization_description'] = $data['organization_description'] !== '' ? $data['organization_description'] : trim((string) ($_POST['business_organization_description'] ?? ''));
-            $data['address_line'] = $data['address_line'] !== '' ? $data['address_line'] : trim((string) ($_POST['business_address_line'] ?? ''));
-            $data['city'] = $data['city'] !== '' ? $data['city'] : trim((string) ($_POST['business_city'] ?? ''));
-            $data['governorate'] = $data['governorate'] !== '' ? $data['governorate'] : trim((string) ($_POST['business_governorate'] ?? ''));
-        }
-
-        store_old_input($data);
-
-        if ($data['first_name'] === '' || $data['last_name'] === '' || $data['email'] === '' || $data['password'] === '') {
-            flash('error', 'Merci de remplir les champs obligatoires.');
-            redirect('register');
-        }
-
-        if (!filter_var($data['email'], FILTER_VALIDATE_EMAIL)) {
-            flash('error', 'Adresse email invalide.');
-            redirect('register');
-        }
-
-        if ($data['password'] !== $data['password_confirmation']) {
-            flash('error', 'La confirmation du mot de passe ne correspond pas.');
-            redirect('register');
-        }
-
-        if (strlen($data['password']) < 6) {
-            flash('error', 'Le mot de passe doit contenir au moins 6 caracteres.');
-            redirect('register');
-        }
-
-        if (!in_array($data['role_code'], ['regular_user', 'association_admin', 'business_owner'], true)) {
-            flash('error', 'Role d inscription non autorise.');
-            redirect('register');
-        }
-
-        if (in_array($data['role_code'], ['business_owner', 'association_admin'], true) && $data['organization_name'] === '') {
-            flash('error', 'Le nom de l organisation est obligatoire pour ce role.');
-            redirect('register');
-        }
-
-        if ($data['role_code'] === 'association_admin' && $data['association_code'] === '') {
-            flash('error', 'Le code association est obligatoire pour une association.');
-            redirect('register');
-        }
-
-        if ($data['role_code'] === 'business_owner' && $data['business_license'] === '') {
-            flash('error', 'La licence business est obligatoire pour un business owner.');
-            redirect('register');
-        }
-
-        $userModel = new UserModel();
-
-        if ($userModel->findByEmail($data['email']) !== null) {
-            flash('error', 'Cet email existe deja.');
-            redirect('register');
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            $this->json(422, ['status' => 'error', 'message' => 'Adresse email invalide.']);
         }
 
         try {
-            $userModel->create($data);
-        } catch (\Throwable $exception) {
-            flash('error', 'Inscription impossible pour le moment: ' . $exception->getMessage());
-            redirect('register');
-        }
+            $user = (new UserModel())->findByEmail($email);
+            if ($user === false || !password_verify($password, (string) $user['MOT_DE_PASSE'])) {
+                $this->json(401, ['status' => 'error', 'message' => 'Identifiants invalides.']);
+            }
 
-        clear_old_input();
-        flash('success', 'Compte cree avec succes. Connectez-vous maintenant.');
-        redirect('login');
+            $frontendRole = match ((string) $user['ROLE_CODE']) {
+                'citizen' => 'acheteur',
+                'business_owner' => 'commerce',
+                'association_admin' => 'admin_association',
+                default => null,
+            };
+
+            if ($frontendRole === null) {
+                $this->json(403, ['status' => 'error', 'message' => 'Role non autorise pour cette interface.']);
+            }
+
+            if ((new SuperAdminModel())->isSuspended((int) $user['ID_UTIL'])) {
+                $this->json(403, ['status' => 'error', 'message' => 'Ce compte est suspendu. Contactez le superadmin.']);
+            }
+
+            $_SESSION['foodloop_user_id'] = (int) $user['ID_UTIL'];
+            $_SESSION['foodloop_role'] = $frontendRole;
+            $_SESSION['foodloop_email'] = (string) $user['EMAIL'];
+            $_SESSION['foodloop_name'] = trim((string) $user['PRENOM'] . ' ' . (string) $user['NOM']);
+
+            $this->json(200, [
+                'status' => 'success',
+                'message' => 'Connexion reussie.',
+                'role' => $frontendRole,
+                'user_id' => (int) $user['ID_UTIL'],
+                'name' => $_SESSION['foodloop_name'],
+            ]);
+        } catch (RuntimeException $exception) {
+            $this->json(500, ['status' => 'error', 'message' => $exception->getMessage()]);
+        } catch (\Throwable) {
+            $this->json(500, ['status' => 'error', 'message' => 'Erreur lors de la connexion.']);
+        }
     }
 
-    public function logout(): string
+    public function registerSubmit(): never
     {
-        Auth::logout();
-        flash('success', 'Vous etes deconnecte.');
-        redirect('home');
+        $this->requirePost();
+        $this->startSession();
+
+        $roleMap = [
+            'acheteur' => 'citizen',
+            'commerce' => 'business_owner',
+            'admin_association' => 'association_admin',
+        ];
+
+        $email = strtolower(trim((string) ($_POST['email'] ?? '')));
+        $password = (string) ($_POST['password'] ?? '');
+        $frontendRole = trim((string) ($_POST['role'] ?? ''));
+        $firstName = trim((string) ($_POST['prenom'] ?? ''));
+        $lastName = trim((string) ($_POST['nom'] ?? ''));
+        $phone = trim((string) ($_POST['telephone'] ?? ''));
+        $address = trim((string) ($_POST['adresse'] ?? ''));
+        $organizationName = trim((string) ($_POST['nom_organisation'] ?? ''));
+
+        if ($email === '' || $password === '' || $frontendRole === '') {
+            $this->json(422, ['status' => 'error', 'message' => 'Les champs email, password et role sont obligatoires.']);
+        }
+
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            $this->json(422, ['status' => 'error', 'message' => 'Adresse email invalide.']);
+        }
+
+        if (mb_strlen($password) < 6) {
+            $this->json(422, ['status' => 'error', 'message' => 'Le mot de passe doit contenir au moins 6 caracteres.']);
+        }
+
+        if (!isset($roleMap[$frontendRole])) {
+            $this->json(422, ['status' => 'error', 'message' => 'Role invalide.']);
+        }
+
+        $firstName = $firstName !== '' ? $firstName : 'Utilisateur';
+        $lastName = $lastName !== '' ? $lastName : 'FoodLoop';
+        $phone = $phone !== '' ? $phone : '00000000';
+        $address = $address !== '' ? $address : 'Adresse a renseigner';
+        if ($organizationName === '') {
+            $organizationName = match ($frontendRole) {
+                'commerce' => 'Commerce FoodLoop',
+                'admin_association' => 'Association FoodLoop',
+                default => '',
+            };
+        }
+
+        try {
+            $userModel = new UserModel();
+            if ($userModel->emailExists($email)) {
+                $this->json(409, ['status' => 'error', 'message' => 'Cet email existe deja.']);
+            }
+
+            $userId = $userModel->create([
+                'email' => $email,
+                'password' => $password,
+                'frontend_role' => $frontendRole,
+                'oracle_role_code' => $roleMap[$frontendRole],
+                'first_name' => $firstName,
+                'last_name' => $lastName,
+                'phone' => $phone,
+                'address' => $address,
+                'organization_name' => $organizationName,
+            ]);
+
+            $this->json(201, [
+                'status' => 'success',
+                'message' => 'Inscription reussie.',
+                'role' => $frontendRole,
+                'user_id' => $userId,
+            ]);
+        } catch (RuntimeException $exception) {
+            $this->json(500, ['status' => 'error', 'message' => $exception->getMessage()]);
+        } catch (\Throwable) {
+            $this->json(500, ['status' => 'error', 'message' => 'Erreur lors de l inscription.']);
+        }
+    }
+
+    public function logout(): never
+    {
+        $this->startSession();
+        $_SESSION = [];
+        session_destroy();
+        header('Location: index.php?route=home');
+        exit;
     }
 }

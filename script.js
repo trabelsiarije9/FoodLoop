@@ -8,22 +8,47 @@ const superadminDashboard = document.querySelector('#superadminDashboard');
 const paymentApp = document.querySelector('#paymentApp');
 const buyerCartStorageKey = 'foodloopBuyerCart';
 const adminCartStorageKey = 'foodloopAdminAssociationCart';
-const checkoutStorageKey = 'foodloopCheckoutCart';
+const checkoutStorageKey = 'foodloopCheckoutCartV2';
+const legacyCheckoutStorageKey = 'foodloopCheckoutCart';
 const checkoutReturnKey = 'foodloopCheckoutReturnPage';
+const annonceStockOverridesKey = 'foodloopAnnonceStockOverrides';
+const reservationEventStorageKey = 'foodloopReservationEvent';
 const superadminRoleKey = 'role';
 const ADMIN_CODE = 'FOODLOOP-ADMIN-2026';
 const currentUserStorageKey = 'currentUser';
 const usersStorageKey = 'foodloopUsers';
+const apiEndpoints = {
+    signup: 'signup.php',
+    login: 'login.php',
+    authStatus: 'auth_status.php',
+    adminAccess: 'admin_access.php',
+    superadmin: 'superadmin.php',
+    reserve: 'reserve.php',
+    payment: 'payment.php',
+    createProduct: 'create_product.php',
+    annonces: 'annonces.php'
+};
 const defaultUsers = [
     { email: 'test@user.com', password: '1234', role: 'acheteur' },
     { email: 'admin@assoc.com', password: '1234', role: 'admin_association' },
     { email: 'shop@store.com', password: '1234', role: 'commerce' }
 ];
+const pageRoutes = {
+    home: 'index.php?route=home',
+    login: 'index.php?route=login',
+    buyer: 'index.php?route=dashboard',
+    association: 'index.php?route=association',
+    business: 'index.php?route=business',
+    admin: 'index.php?route=admin',
+    adminAccess: 'index.php?route=admin-access',
+    payment: 'index.php?route=payment',
+    logout: 'index.php?route=logout'
+};
 const roleRoutes = {
-    acheteur: 'buyer_dashboard.html',
-    admin_association: 'admin_association_dashboard.html',
-    commerce: 'merchant_dashboard.html',
-    superadmin: 'superadmin_dashboard.html'
+    acheteur: pageRoutes.buyer,
+    admin_association: pageRoutes.association,
+    commerce: pageRoutes.business,
+    superadmin: pageRoutes.admin
 };
 
 function getStoredUsers() {
@@ -54,8 +79,34 @@ function setCurrentUser(user) {
     window.localStorage.setItem(currentUserStorageKey, JSON.stringify(user));
 }
 
+function getUserDisplayName(user, fallback = 'Client FoodLoop') {
+    if (user && typeof user.name === 'string' && user.name.trim() !== '') {
+        return user.name.trim();
+    }
+
+    if (user && typeof user.email === 'string' && user.email.trim() !== '') {
+        return user.email.trim().split('@')[0];
+    }
+
+    return fallback;
+}
+
+function getUserInitials(name, fallback = 'U') {
+    const normalizedName = String(name || '').trim();
+    if (normalizedName === '') {
+        return fallback;
+    }
+
+    const parts = normalizedName.split(/\s+/).filter(Boolean);
+    if (parts.length === 1) {
+        return parts[0].charAt(0).toUpperCase();
+    }
+
+    return `${parts[0].charAt(0)}${parts[1].charAt(0)}`.toUpperCase();
+}
+
 function getRouteForRole(role) {
-    return roleRoutes[role] || 'login_signup.html';
+    return roleRoutes[role] || pageRoutes.login;
 }
 
 function redirectToRoleHome(role) {
@@ -65,7 +116,7 @@ function redirectToRoleHome(role) {
 function requireAuthenticatedUser() {
     const user = getCurrentUser();
     if (!user) {
-        window.location.href = 'login_signup.html';
+        window.location.href = pageRoutes.login;
         return null;
     }
 
@@ -104,9 +155,700 @@ function persistStoredArray(storageKey, value) {
     window.localStorage.setItem(storageKey, JSON.stringify(value));
 }
 
+function normalizeCheckoutItem(item, user = getCurrentUser()) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+        return null;
+    }
+
+    const reservationId = Number(item.reservation_id ?? item.reservationId ?? 0);
+    const quantity = Number(item.quantity) > 0 ? Number(item.quantity) : 1;
+    const priceValue = parsePaymentPrice(item.price);
+    const normalized = attachOwnership({
+        ...item,
+        reservation_id: Number.isFinite(reservationId) ? reservationId : 0,
+        quantity,
+        price: item.price ?? '',
+    }, user);
+
+    if (!Number.isInteger(normalized.reservation_id) || normalized.reservation_id <= 0) {
+        return null;
+    }
+
+    if (!Number.isFinite(priceValue) || priceValue <= 0) {
+        return null;
+    }
+
+    return normalized;
+}
+
+function getUserStorageSuffix(user = getCurrentUser()) {
+    if (!user) {
+        return 'guest';
+    }
+
+    const role = String(user.role || 'guest').trim().toLowerCase() || 'guest';
+    const id = user.id === null || user.id === undefined || user.id === '' ? 'no-id' : String(user.id).trim();
+    const email = String(user.email || '').trim().toLowerCase() || 'no-email';
+    return `${role}:${id}:${email}`;
+}
+
+function getScopedStorageKey(baseKey, user = getCurrentUser()) {
+    return `${baseKey}:${getUserStorageSuffix(user)}`;
+}
+
+function loadScopedArray(baseKey, fallback = [], user = getCurrentUser()) {
+    const value = loadStoredArray(getScopedStorageKey(baseKey, user));
+    return value.length === 0 ? [...fallback] : value;
+}
+
+function persistScopedArray(baseKey, value, user = getCurrentUser()) {
+    persistStoredArray(getScopedStorageKey(baseKey, user), value);
+}
+
+function loadScopedObject(baseKey, fallback = {}, user = getCurrentUser()) {
+    try {
+        const raw = window.localStorage.getItem(getScopedStorageKey(baseKey, user));
+        if (!raw) {
+            return { ...fallback };
+        }
+
+        const parsed = JSON.parse(raw);
+        return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? { ...fallback, ...parsed } : { ...fallback };
+    } catch (error) {
+        return { ...fallback };
+    }
+}
+
+function persistScopedObject(baseKey, value, user = getCurrentUser()) {
+    window.localStorage.setItem(getScopedStorageKey(baseKey, user), JSON.stringify(value));
+}
+
+function loadGlobalObject(storageKey, fallback = {}) {
+    try {
+        const raw = window.localStorage.getItem(storageKey);
+        if (!raw) {
+            return { ...fallback };
+        }
+
+        const parsed = JSON.parse(raw);
+        return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? { ...fallback, ...parsed } : { ...fallback };
+    } catch (error) {
+        return { ...fallback };
+    }
+}
+
+function persistGlobalObject(storageKey, value) {
+    window.localStorage.setItem(storageKey, JSON.stringify(value));
+}
+
+function getUserOwnership(user = getCurrentUser()) {
+    if (!user) {
+        return null;
+    }
+
+    return {
+        ownerRole: String(user.role || '').trim().toLowerCase(),
+        ownerId: user.id === null || user.id === undefined || user.id === '' ? null : String(user.id).trim(),
+        ownerEmail: String(user.email || '').trim().toLowerCase() || null
+    };
+}
+
+function attachOwnership(record, user = getCurrentUser()) {
+    if (!record || typeof record !== 'object') {
+        return record;
+    }
+
+    const ownership = getUserOwnership(user);
+    return ownership ? { ...record, ...ownership } : { ...record };
+}
+
+function recordBelongsToUser(record, user = getCurrentUser()) {
+    if (!record || typeof record !== 'object' || Array.isArray(record) || !user) {
+        return false;
+    }
+
+    const userRole = String(user.role || '').trim().toLowerCase();
+    const userId = user.id === null || user.id === undefined || user.id === '' ? null : String(user.id).trim();
+    const userEmail = String(user.email || '').trim().toLowerCase() || null;
+    const recordRole = String(record.ownerRole || '').trim().toLowerCase();
+    const recordId = record.ownerId === null || record.ownerId === undefined || record.ownerId === '' ? null : String(record.ownerId).trim();
+    const recordEmail = String(record.ownerEmail || '').trim().toLowerCase() || null;
+
+    if (recordRole === '' || recordRole !== userRole) {
+        return false;
+    }
+
+    if (recordEmail && userEmail) {
+        return recordEmail === userEmail;
+    }
+
+    if (recordId && userId) {
+        return recordId === userId;
+    }
+
+    return false;
+}
+
+function loadOwnedScopedArray(baseKey, fallback = [], user = getCurrentUser()) {
+    const scopedItems = loadScopedArray(baseKey, fallback, user);
+    return scopedItems.filter((item) => recordBelongsToUser(item, user));
+}
+
+function isOracleUnavailableMessage(message) {
+    return typeof message === 'string' && message.toLowerCase().includes('oracle');
+}
+
+function buildLocalUserId(email) {
+    const users = getStoredUsers();
+    const index = users.findIndex((user) => String(user.email || '').toLowerCase() === String(email || '').toLowerCase());
+    return index >= 0 ? index + 1 : Date.now();
+}
+
+function loginWithLocalFallback(email, password) {
+    const users = getStoredUsers();
+    const matchedUser = users.find((user) => {
+        return String(user.email || '').toLowerCase() === String(email || '').toLowerCase()
+            && String(user.password || '') === String(password || '');
+    });
+
+    if (!matchedUser) {
+        throw new Error('Identifiants invalides.');
+    }
+
+    return {
+        status: 'success',
+        role: matchedUser.role,
+        user_id: buildLocalUserId(email),
+        fallback: true
+    };
+}
+
+function signupWithLocalFallback(email, password, role) {
+    const users = getStoredUsers();
+    const normalizedEmail = String(email || '').trim().toLowerCase();
+
+    if (users.some((user) => String(user.email || '').toLowerCase() === normalizedEmail)) {
+        throw new Error('Un compte existe deja avec cet email.');
+    }
+
+    users.push({
+        email: normalizedEmail,
+        password: String(password || ''),
+        role: String(role || 'acheteur')
+    });
+
+    persistStoredArray(usersStorageKey, users);
+
+    return {
+        status: 'success',
+        fallback: true
+    };
+}
+
 function setCheckoutState(cartItems, returnPage) {
-    persistStoredArray(checkoutStorageKey, cartItems);
+    const currentUser = getCurrentUser();
+    const normalizedCartItems = Array.isArray(cartItems)
+        ? cartItems.map((item) => normalizeCheckoutItem(item, currentUser)).filter(Boolean)
+        : [];
+    persistStoredArray(checkoutStorageKey, normalizedCartItems);
+    window.localStorage.removeItem(legacyCheckoutStorageKey);
     window.localStorage.setItem(checkoutReturnKey, returnPage);
+}
+
+async function postToPhpEndpoint(endpoint, formData) {
+    const response = await window.fetch(endpoint, {
+        method: 'POST',
+        body: formData,
+        credentials: 'same-origin'
+    });
+
+    let payload = null;
+
+    try {
+        payload = await response.json();
+    } catch (error) {
+        payload = null;
+    }
+
+    if (response.status === 401) {
+        clearApplicationState();
+    }
+
+    if (!response.ok || !payload || payload.status !== 'success') {
+        const message = payload && payload.message ? payload.message : 'Une erreur est survenue.';
+        throw new Error(message);
+    }
+
+    return payload;
+}
+
+async function getFromPhpEndpoint(endpoint) {
+    const response = await window.fetch(endpoint, {
+        method: 'GET',
+        credentials: 'same-origin'
+    });
+
+    let payload = null;
+
+    try {
+        payload = await response.json();
+    } catch (error) {
+        payload = null;
+    }
+
+    if (response.status === 401) {
+        clearApplicationState();
+    }
+
+    if (!response.ok || !payload || payload.status !== 'success') {
+        const message = payload && payload.message ? payload.message : 'Une erreur est survenue.';
+        throw new Error(message);
+    }
+
+    return payload;
+}
+
+async function fetchAuthenticatedUser() {
+    const response = await window.fetch(apiEndpoints.authStatus, {
+        method: 'GET',
+        credentials: 'same-origin'
+    });
+
+    let payload = null;
+
+    try {
+        payload = await response.json();
+    } catch (error) {
+        payload = null;
+    }
+
+    if (response.status === 401) {
+        clearApplicationState();
+        return null;
+    }
+
+    if (!response.ok || !payload || payload.status !== 'success' || !payload.user || typeof payload.user !== 'object') {
+        return null;
+    }
+
+    const normalizedUser = {
+        id: payload.user.id,
+        role: payload.user.role,
+        email: payload.user.email || '',
+        name: payload.user.name || ''
+    };
+    setCurrentUser(normalizedUser);
+    return normalizedUser;
+}
+
+function clearApplicationState() {
+    window.localStorage.removeItem(currentUserStorageKey);
+    window.localStorage.removeItem(superadminRoleKey);
+    window.localStorage.removeItem(checkoutStorageKey);
+    window.localStorage.removeItem(legacyCheckoutStorageKey);
+    window.localStorage.removeItem(checkoutReturnKey);
+}
+
+function appendItemsToUserHistory(user, baseKey, items, extra = {}) {
+    if (!user || !Array.isArray(items) || items.length === 0) {
+        return;
+    }
+
+    const existingHistory = loadOwnedScopedArray(baseKey, [], user);
+    const normalizedItems = items.map((item) => attachOwnership({
+        id: item.id,
+        title: item.title,
+        description: item.description || '',
+        location: item.location || '',
+        price: item.price || '',
+        pickupTime: item.pickupTime || '',
+        quantity: Number(item.quantity) > 0 ? Number(item.quantity) : 1,
+        addedAt: new Date().toISOString(),
+        ...extra
+    }, user));
+
+    persistScopedArray(baseKey, [...normalizedItems, ...existingHistory], user);
+}
+
+function appendItemsToUserReservations(user, baseKey, items, extra = {}) {
+    if (!user || !Array.isArray(items) || items.length === 0) {
+        return;
+    }
+
+    const existingReservations = loadOwnedScopedArray(baseKey, [], user);
+    const normalizedItems = items.map((item) => attachOwnership({
+        id: item.id,
+        title: item.title,
+        location: item.location || '',
+        price: item.price || '',
+        pickupTime: item.pickupTime || '',
+        quantity: Number(item.quantity) > 0 ? Number(item.quantity) : 1,
+        reservedAt: new Date().toISOString(),
+        ...extra
+    }, user));
+
+    persistScopedArray(baseKey, [...normalizedItems, ...existingReservations], user);
+}
+
+function prependUserNotification(user, baseKey, notification) {
+    if (!user || !notification) {
+        return;
+    }
+
+    const notifications = loadOwnedScopedArray(baseKey, [], user);
+    persistScopedArray(baseKey, [attachOwnership({ id: Date.now(), ...notification }, user), ...notifications], user);
+}
+
+function clearScopedCart(baseKey, user = getCurrentUser()) {
+    window.localStorage.removeItem(getScopedStorageKey(baseKey, user));
+}
+
+function finalizeSuccessfulCheckout(user, items, returnPage) {
+    if (!user || !Array.isArray(items) || items.length === 0) {
+        return;
+    }
+
+    if (returnPage === pageRoutes.association) {
+        appendItemsToUserReservations(user, 'foodloopAdminAssociationReservations', items, { status: 'Reserved' });
+        appendItemsToUserHistory(user, 'foodloopAdminAssociationHistory', items, { status: 'Paid' });
+        prependUserNotification(user, 'foodloopAdminAssociationNotifications', {
+            title: 'Reservation confirmee',
+            message: `${items.length} lot(s) ont ete ajoutes a votre historique.`
+        });
+        clearScopedCart(adminCartStorageKey, user);
+        return;
+    }
+
+    appendItemsToUserReservations(user, 'foodloopBuyerReservations', items, { status: 'Reserved' });
+    appendItemsToUserHistory(user, 'foodloopBuyerHistory', items, { status: 'Paid' });
+    prependUserNotification(user, 'foodloopBuyerNotifications', {
+        title: 'Reservation confirmee',
+        message: `${items.length} produit(s) ont ete ajoutes a votre historique.`
+    });
+    clearScopedCart(buyerCartStorageKey, user);
+}
+
+function getOracleAnnonceId(productId) {
+    if (productId >= 101 && productId <= 199) {
+        return productId - 100;
+    }
+
+    return productId;
+}
+
+function getStoredAnnonceStockOverrides() {
+    return loadGlobalObject(annonceStockOverridesKey, {});
+}
+
+function getCategoryImage(category) {
+    const normalized = String(category || '').trim().toLowerCase();
+
+    if (normalized.includes('boulangerie')) {
+        return 'https://images.unsplash.com/photo-1774043132154-8934327dee3a?auto=format&fit=crop&fm=jpg&q=80&w=1200';
+    }
+
+    if (normalized.includes('plat') || normalized.includes('restauration') || normalized.includes('repas')) {
+        return 'https://images.unsplash.com/photo-1568897798550-91c8caffe391?auto=format&fit=crop&fm=jpg&q=80&w=1200';
+    }
+
+    if (normalized.includes('lait') || normalized.includes('frais')) {
+        return 'https://images.unsplash.com/photo-1612383277710-67896ecf4c69?auto=format&fit=crop&fm=jpg&q=80&w=1200';
+    }
+
+    if (normalized.includes('epicerie') || normalized.includes('fruit') || normalized.includes('legume')) {
+        return 'https://images.unsplash.com/photo-1765480953875-a7338f896e91?auto=format&fit=crop&fm=jpg&q=80&w=1200';
+    }
+
+    return 'https://images.unsplash.com/photo-1584093092919-3d551a9c5055?auto=format&fit=crop&fm=jpg&q=80&w=1200';
+}
+
+function formatPrice(price) {
+    const normalized = Number(price);
+    return `${(Number.isFinite(normalized) ? normalized : 0).toFixed(2)} DT`;
+}
+
+function getStoredAnnonceStock(annonceId, fallbackQuantity = null) {
+    const overrides = getStoredAnnonceStockOverrides();
+    const key = String(annonceId);
+    if (!Object.prototype.hasOwnProperty.call(overrides, key)) {
+        return fallbackQuantity;
+    }
+
+    const quantity = Number(overrides[key]);
+    return Number.isFinite(quantity) ? quantity : fallbackQuantity;
+}
+
+function setStoredAnnonceStock(annonceId, quantity) {
+    const overrides = getStoredAnnonceStockOverrides();
+    overrides[String(annonceId)] = Number(quantity);
+    persistGlobalObject(annonceStockOverridesKey, overrides);
+}
+
+function applyStoredStockToProducts(products) {
+    if (!Array.isArray(products)) {
+        return;
+    }
+
+    products.forEach((product) => {
+        if (!product || typeof product !== 'object') {
+            return;
+        }
+
+        const annonceId = getOracleAnnonceId(Number(product.id));
+        const fallbackQuantity = Object.prototype.hasOwnProperty.call(product, 'stock')
+            ? product.stock
+            : (Object.prototype.hasOwnProperty.call(product, 'quantity') ? product.quantity : null);
+        const storedStock = getStoredAnnonceStock(annonceId, fallbackQuantity);
+        if (Number.isFinite(storedStock)) {
+            if (Object.prototype.hasOwnProperty.call(product, 'stock')) {
+                product.stock = Math.max(0, Number(storedStock));
+            }
+            if (Object.prototype.hasOwnProperty.call(product, 'quantity')) {
+                product.quantity = Math.max(0, Number(storedStock));
+            }
+        }
+    });
+}
+
+function updateProductStockInView(products, reservedItems) {
+    if (!Array.isArray(products) || !Array.isArray(reservedItems)) {
+        return;
+    }
+
+    reservedItems.forEach((item) => {
+        const annonceId = Number(item.annonce_id || getOracleAnnonceId(Number(item.id)));
+        const remainingQuantity = Number(item.quantite_restante);
+        if (!Number.isFinite(annonceId) || !Number.isFinite(remainingQuantity)) {
+            return;
+        }
+
+        setStoredAnnonceStock(annonceId, remainingQuantity);
+        const matchingProduct = products.find((product) => getOracleAnnonceId(Number(product.id)) === annonceId);
+        if (matchingProduct) {
+            if (Object.prototype.hasOwnProperty.call(matchingProduct, 'stock')) {
+                matchingProduct.stock = Math.max(0, remainingQuantity);
+            }
+            if (Object.prototype.hasOwnProperty.call(matchingProduct, 'quantity')) {
+                matchingProduct.quantity = Math.max(0, remainingQuantity);
+            }
+        }
+    });
+}
+
+async function syncProductsWithBackendAvailability(products) {
+    if (!Array.isArray(products) || products.length === 0) {
+        return;
+    }
+
+    const annonceIds = [...new Set(products.map((product) => getOracleAnnonceId(Number(product.id))).filter((id) => Number.isInteger(id) && id > 0))];
+    if (annonceIds.length === 0) {
+        return;
+    }
+
+    const payload = await getFromPhpEndpoint(`${apiEndpoints.annonces}?ids=${encodeURIComponent(annonceIds.join(','))}`);
+    const snapshots = new Map((payload.items || []).map((item) => [Number(item.annonce_id), item]));
+
+    products.forEach((product) => {
+        const annonceId = getOracleAnnonceId(Number(product.id));
+        const snapshot = snapshots.get(annonceId);
+
+        if (!snapshot) {
+            if (Object.prototype.hasOwnProperty.call(product, 'stock')) {
+                product.stock = 0;
+            }
+            product.isReservable = false;
+            product.backendStatus = 'missing';
+            return;
+        }
+
+        const quantity = Math.max(0, Number(snapshot.quantity) || 0);
+        const statusCode = String(snapshot.status_code || '').trim().toLowerCase();
+
+        if (Object.prototype.hasOwnProperty.call(product, 'stock')) {
+            product.stock = quantity;
+        }
+
+        if (typeof snapshot.title === 'string' && snapshot.title.trim() !== '') {
+            product.title = snapshot.title.trim();
+        }
+
+        if (typeof snapshot.description === 'string' && snapshot.description.trim() !== '') {
+            product.description = snapshot.description.trim();
+        }
+
+        if (typeof snapshot.location === 'string' && snapshot.location.trim() !== '') {
+            product.location = snapshot.location.trim();
+        }
+
+        product.backendStatus = statusCode;
+        product.isReservable = ['available', 'priority_access'].includes(statusCode) && quantity > 0;
+        setStoredAnnonceStock(annonceId, quantity);
+    });
+}
+
+async function loadFeedProducts() {
+    const payload = await getFromPhpEndpoint(`${apiEndpoints.annonces}?feed=1`);
+    const items = Array.isArray(payload.items) ? payload.items : [];
+
+    return items.map((item, index) => {
+        const category = String(item.category || item.type || 'Produit');
+        const zone = String(item.zone || item.city || item.location || 'Zone');
+        const city = String(item.city || item.location || zone);
+
+        return {
+            id: Number(item.id),
+            title: String(item.title || 'Annonce FoodLoop'),
+            description: String(item.description || ''),
+            location: String(item.location || city),
+            zone,
+            category,
+            distance: index + 1,
+            price: formatPrice(item.price),
+            pickupTime: String(item.pickup_time || 'Horaire a confirmer'),
+            stock: Math.max(0, Number(item.stock) || 0),
+            image: getCategoryImage(category),
+            isReservable: ['available', 'priority_access'].includes(String(item.status_code || '').toLowerCase()) && Number(item.stock) > 0,
+            backendStatus: String(item.status_code || '').toLowerCase(),
+            unit: String(item.unit || 'unite')
+        };
+    });
+}
+
+async function loadMerchantAnnouncements() {
+    const payload = await getFromPhpEndpoint(`${apiEndpoints.annonces}?owner_feed=1`);
+    const items = Array.isArray(payload.items) ? payload.items : [];
+
+    return items.map((item) => attachOwnership({
+        id: Number(item.id),
+        title: String(item.title || 'Annonce FoodLoop'),
+        description: String(item.description || ''),
+        foodType: String(item.food_type || item.category || 'Produit'),
+        quantity: Math.max(0, Number(item.quantity) || 0),
+        unit: String(item.unit || 'unite'),
+        location: String(item.location || ''),
+        status: String(item.status_code || 'available'),
+        price: formatPrice(item.price),
+        pickupTime: String(item.pickup_time || 'Horaire a confirmer'),
+        paymentMethod: 'N/A'
+    }, getCurrentUser()));
+}
+
+async function showDesktopNotification(title, body) {
+    if (typeof window === 'undefined' || typeof window.Notification === 'undefined') {
+        return;
+    }
+
+    let permission = window.Notification.permission;
+    if (permission === 'default') {
+        permission = await window.Notification.requestPermission();
+    }
+
+    if (permission === 'granted') {
+        new window.Notification(title, { body });
+    }
+}
+
+function broadcastReservationEvent(items) {
+    if (!Array.isArray(items) || items.length === 0) {
+        return;
+    }
+
+    const firstItem = items[0];
+    const payload = {
+        id: Date.now(),
+        count: items.length,
+        title: firstItem && firstItem.title ? String(firstItem.title) : 'Reservation',
+        timestamp: new Date().toISOString()
+    };
+    window.localStorage.setItem(reservationEventStorageKey, JSON.stringify(payload));
+}
+
+function registerReservationRealtimeHandlers(onUpdate) {
+    window.addEventListener('storage', (event) => {
+        if (event.key === annonceStockOverridesKey && typeof onUpdate === 'function') {
+            onUpdate();
+            return;
+        }
+
+        if (event.key !== reservationEventStorageKey || !event.newValue) {
+            return;
+        }
+
+        try {
+            const payload = JSON.parse(event.newValue);
+            if (typeof onUpdate === 'function') {
+                onUpdate();
+            }
+            showDesktopNotification(
+                'Nouvelle reservation FoodLoop',
+                payload && payload.count > 1
+                    ? `${payload.count} reservations viennent d'etre enregistrees.`
+                    : `${payload.title || 'Une reservation'} vient d'etre enregistree.`
+            );
+        } catch (error) {
+            if (typeof onUpdate === 'function') {
+                onUpdate();
+            }
+        }
+    });
+}
+
+async function createReservationsFromCart(items) {
+    const createdReservations = [];
+
+    for (const item of items) {
+        const formData = new FormData();
+        const annonceId = getOracleAnnonceId(Number(item.id));
+        const requestedQuantity = Number(item.quantity) > 0 ? Number(item.quantity) : 1;
+        formData.append('annonce_id', String(annonceId));
+        formData.append('quantite', String(requestedQuantity));
+
+        const payload = await postToPhpEndpoint(apiEndpoints.reserve, formData);
+        createdReservations.push({
+            ...item,
+            annonce_id: annonceId,
+            quantity: requestedQuantity,
+            reservation_id: payload.reservation_id,
+            quantite_restante: Number(payload.quantite_restante)
+        });
+    }
+
+    return createdReservations;
+}
+
+async function processPaymentsForCart(items, method, extraFields = {}) {
+    const results = [];
+
+    for (const item of items) {
+        const normalizedReservationId = Number(item && item.reservation_id);
+        const normalizedAmount = (Number(item && item.quantity) > 0 ? Number(item.quantity) : 1) * parsePaymentPrice(item && item.price);
+
+        if (!Number.isInteger(normalizedReservationId) || normalizedReservationId <= 0) {
+            throw new Error('Cette session de paiement est invalide. Retournez au dashboard et refaites la reservation.');
+        }
+
+        if (!Number.isFinite(normalizedAmount) || normalizedAmount <= 0) {
+            throw new Error('Montant de paiement invalide. Retournez au dashboard et refaites la reservation.');
+        }
+
+        const formData = new FormData();
+        formData.append('reservation_id', String(normalizedReservationId));
+        formData.append('montant', String(normalizedAmount));
+        formData.append('method', method);
+
+        Object.entries(extraFields).forEach(([key, value]) => {
+            formData.append(key, value);
+        });
+
+        const payload = await postToPhpEndpoint(apiEndpoints.payment, formData);
+        results.push(payload);
+    }
+
+    return results;
+}
+
+function parsePaymentPrice(value) {
+    return Number.parseFloat(String(value).replace(' DT', '').replace(',', '.')) || 0;
 }
 
 if (adminAccessApp) {
@@ -114,32 +856,40 @@ if (adminAccessApp) {
     const adminCodeInput = document.querySelector('#adminCodeInput');
     const adminAccessMessage = document.querySelector('#adminAccessMessage');
 
-    adminAccessForm?.addEventListener('submit', (event) => {
+    adminAccessForm?.addEventListener('submit', async (event) => {
         event.preventDefault();
         const submittedCode = adminCodeInput instanceof HTMLInputElement ? adminCodeInput.value.trim() : '';
 
-        if (submittedCode === ADMIN_CODE) {
+        if (submittedCode === '') {
+            adminAccessMessage.textContent = 'Code incorrect';
+            return;
+        }
+
+        try {
+            const formData = new FormData();
+            formData.append('adminCode', submittedCode);
+            const payload = await postToPhpEndpoint(apiEndpoints.adminAccess, formData);
+
             const superadminUser = {
-                email: 'superadmin@foodloop.com',
-                password: ADMIN_CODE,
-                role: 'superadmin'
+                id: 1,
+                email: 'superadmin@foodloop.local',
+                role: payload.role || 'superadmin',
+                name: payload.name || 'Superadmin FoodLoop'
             };
             window.localStorage.setItem(superadminRoleKey, 'superadmin');
             setCurrentUser(superadminUser);
             adminAccessMessage.textContent = '';
             adminAccessApp.classList.add('is-redirecting');
             window.setTimeout(() => {
-                window.location.href = 'superadmin_dashboard.html';
+                window.location.href = pageRoutes.admin;
             }, 180);
-            return;
+        } catch (error) {
+            adminAccessMessage.textContent = error instanceof Error ? error.message : 'Code incorrect';
         }
-
-        adminAccessMessage.textContent = 'Code incorrect';
     });
 }
 
 if (marketplaceRoot) {
-    const isLoggedIn = getCurrentUser() !== null;
     const products = [
         {
             id: 1,
@@ -331,10 +1081,10 @@ if (marketplaceRoot) {
         state.selectedProduct = product;
         modalTitle.textContent = product.title;
         modalDescription.textContent = `${product.description} Retrait prevu a ${product.location}.`;
+        modalActionButton.textContent = 'Reserver';
         reservationModal.classList.add('is-open');
         reservationModal.setAttribute('aria-hidden', 'false');
         document.body.style.overflow = 'hidden';
-        console.log(`Reservation simulee pour: ${product.title}`);
     }
 
     function closeReservationModal() {
@@ -373,14 +1123,17 @@ if (marketplaceRoot) {
     typeFilter.addEventListener('change', refreshProducts);
     distanceFilter.addEventListener('change', refreshProducts);
 
-    productsGrid.addEventListener('click', (event) => {
+    productsGrid.addEventListener('click', async (event) => {
         const target = event.target;
         if (!(target instanceof HTMLElement)) {
             return;
         }
 
         if (target.matches('[data-product-id]')) {
-            if (isLoggedIn === false) {
+            const currentUser = await fetchAuthenticatedUser();
+
+            if (!currentUser || typeof currentUser.role !== 'string' || currentUser.role.trim() === '') {
+                closeReservationModal();
                 openAuthRequiredModal();
                 return;
             }
@@ -431,12 +1184,13 @@ if (authApp) {
     const authSubtitle = document.querySelector('#authSubtitle');
     const authStepIndicator = document.querySelector('#authStepIndicator');
     const authStepContent = document.querySelector('#authStepContent');
-    const users = getStoredUsers();
 
     const authState = {
         step: 'login',
         role: 'acheteur',
-        errorMessage: ''
+        errorMessage: '',
+        successMessage: '',
+        isSubmitting: false
     };
 
     const formSchemas = {
@@ -494,7 +1248,7 @@ if (authApp) {
             },
             form: {
                 title: formSchemas[authState.role].title,
-                subtitle: `Parcours ${formSchemas[authState.role].subtitle.toLowerCase()} pret pour une integration PHP + Oracle.`
+                subtitle: ''
             }
         };
 
@@ -548,7 +1302,8 @@ if (authApp) {
                         <input type="password" name="password" placeholder="Votre mot de passe">
                     </label>
                     ${authState.errorMessage ? `<p class="inline-error">${authState.errorMessage}</p>` : ''}
-                    <button class="auth-primary-button" type="submit">Se connecter</button>
+                    ${authState.successMessage ? `<p class="inline-success">${authState.successMessage}</p>` : ''}
+                    <button class="auth-primary-button" type="submit" ${authState.isSubmitting ? 'disabled' : ''}>${authState.isSubmitting ? 'Connexion...' : 'Se connecter'}</button>
                 </form>
                 <div class="auth-link-row">
                     <span>Vous n'avez pas de compte ?</span>
@@ -600,12 +1355,13 @@ if (authApp) {
                 <form class="auth-form-stack" data-auth-action="create-account">
                     <div class="auth-form-heading">
                         <strong>${schema.title}</strong>
-                        <span>${schema.subtitle}</span>
+                        ${schema.subtitle ? `<span>${schema.subtitle}</span>` : ''}
                     </div>
                     ${fields}
-                    <button class="auth-primary-button" type="submit">Creer le compte</button>
+                    ${authState.errorMessage ? `<p class="inline-error">${authState.errorMessage}</p>` : ''}
+                    ${authState.successMessage ? `<p class="inline-success">${authState.successMessage}</p>` : ''}
+                    <button class="auth-primary-button" type="submit" ${authState.isSubmitting ? 'disabled' : ''}>${authState.isSubmitting ? 'Creation...' : 'Creer le compte'}</button>
                 </form>
-                <p class="auth-success-note">La soumission simulera une redirection vers le futur dashboard.</p>
             </div>
         `;
     }
@@ -638,6 +1394,7 @@ if (authApp) {
         if (nextStep === 'login' || nextStep === 'role') {
             authState.step = nextStep;
             authState.errorMessage = '';
+            authState.successMessage = '';
             renderAuthApp();
         }
     });
@@ -649,7 +1406,7 @@ if (authApp) {
         }
     });
 
-    authStepContent.addEventListener('submit', (event) => {
+    authStepContent.addEventListener('submit', async (event) => {
         event.preventDefault();
         const form = event.target;
         if (!(form instanceof HTMLFormElement)) {
@@ -662,20 +1419,39 @@ if (authApp) {
             const formData = new FormData(form);
             const email = String(formData.get('email') || '').trim().toLowerCase();
             const password = String(formData.get('password') || '');
-            const matchedUser = users.find((user) => user.email.toLowerCase() === email && user.password === password);
-
-            if (!matchedUser) {
-                authState.errorMessage = 'Email ou mot de passe incorrect';
-                renderAuthApp();
-                return;
-            }
-
+            authState.isSubmitting = true;
             authState.errorMessage = '';
-            setCurrentUser(matchedUser);
-            if (matchedUser.role === 'superadmin') {
-                window.localStorage.setItem(superadminRoleKey, 'superadmin');
+            authState.successMessage = '';
+            renderAuthApp();
+
+            try {
+                let payload;
+
+                try {
+                    payload = await postToPhpEndpoint(apiEndpoints.login, formData);
+                } catch (error) {
+                    if (!(error instanceof Error) || !isOracleUnavailableMessage(error.message)) {
+                        throw error;
+                    }
+
+                    payload = loginWithLocalFallback(email, password);
+                }
+
+                const connectedUser = {
+                    id: payload.user_id,
+                    email,
+                    role: payload.role,
+                    name: payload.name || email
+                };
+                setCurrentUser(connectedUser);
+                authState.isSubmitting = false;
+                authState.successMessage = payload.fallback ? 'Connexion effectuee en mode local.' : '';
+                redirectToRoleHome(payload.role);
+            } catch (error) {
+                authState.isSubmitting = false;
+                authState.errorMessage = error instanceof Error ? error.message : 'Email ou mot de passe incorrect';
+                renderAuthApp();
             }
-            redirectToRoleHome(matchedUser.role);
             return;
         }
 
@@ -683,26 +1459,74 @@ if (authApp) {
             const formData = new FormData(form);
             authState.role = String(formData.get('role') || 'acheteur');
             authState.step = 'form';
+            authState.errorMessage = '';
+            authState.successMessage = '';
             renderAuthApp();
             return;
         }
 
         if (action === 'create-account') {
-            const formData = new FormData(form);
-            const email = String(formData.get('email') || '').trim().toLowerCase();
-            const password = String(formData.get('password') || '');
-            const newUser = {
-                email,
-                password,
-                role: authState.role
-            };
+            const localFormData = new FormData(form);
+            const signupFormData = new FormData();
+            const email = String(localFormData.get('email') || '').trim().toLowerCase();
 
-            const nextUsers = users.filter((user) => user.email.toLowerCase() !== email);
-            nextUsers.push(newUser);
-            persistStoredArray(usersStorageKey, nextUsers);
-            setCurrentUser(newUser);
+            signupFormData.append('email', email);
+            signupFormData.append('password', String(localFormData.get('password') || ''));
+            signupFormData.append('role', authState.role);
+
+            if (authState.role === 'acheteur') {
+                signupFormData.append('prenom', String(localFormData.get('prenom') || '').trim());
+                signupFormData.append('nom', String(localFormData.get('nom') || '').trim());
+                signupFormData.append('telephone', String(localFormData.get('telephone') || '').trim());
+                signupFormData.append('adresse', String(localFormData.get('adresse') || '').trim());
+            }
+
+            if (authState.role === 'commerce') {
+                const commerceName = String(localFormData.get('nomCommerce') || '').trim();
+                signupFormData.append('prenom', 'Commerce');
+                signupFormData.append('nom', commerceName || 'FoodLoop');
+                signupFormData.append('telephone', '00000000');
+                signupFormData.append('adresse', String(localFormData.get('adresse') || '').trim());
+                signupFormData.append('nom_organisation', commerceName);
+                signupFormData.append('business_license', String(localFormData.get('licence') || '').trim());
+            }
+
+            if (authState.role === 'admin_association') {
+                const associationName = String(localFormData.get('association') || '').trim();
+                signupFormData.append('prenom', 'Admin');
+                signupFormData.append('nom', associationName || 'Association');
+                signupFormData.append('telephone', String(localFormData.get('telephone') || '').trim());
+                signupFormData.append('adresse', String(localFormData.get('adresse') || '').trim());
+                signupFormData.append('nom_organisation', associationName);
+            }
+
+            authState.isSubmitting = true;
             authState.errorMessage = '';
-            redirectToRoleHome(newUser.role);
+            authState.successMessage = '';
+            renderAuthApp();
+
+            try {
+                try {
+                    await postToPhpEndpoint(apiEndpoints.signup, signupFormData);
+                    authState.successMessage = 'Compte cree avec succes. Connectez-vous maintenant.';
+                } catch (error) {
+                    if (!(error instanceof Error) || !isOracleUnavailableMessage(error.message)) {
+                        throw error;
+                    }
+
+                    signupWithLocalFallback(email, String(localFormData.get('password') || ''), authState.role);
+                    authState.successMessage = 'Compte cree en mode local. Connectez-vous maintenant.';
+                }
+
+                authState.isSubmitting = false;
+                authState.errorMessage = '';
+                authState.step = 'login';
+                renderAuthApp();
+            } catch (error) {
+                authState.isSubmitting = false;
+                authState.errorMessage = error instanceof Error ? error.message : 'Inscription impossible.';
+                renderAuthApp();
+            }
         }
     });
 
@@ -711,97 +1535,26 @@ if (authApp) {
 
 if (buyerDashboard && requireRole('acheteur')) {
     const cartStorageKey = 'foodloopBuyerCart';
+    const buyerNotificationsKey = 'foodloopBuyerNotifications';
+    const buyerReservationsKey = 'foodloopBuyerReservations';
+    const buyerHistoryKey = 'foodloopBuyerHistory';
+    const currentBuyerUser = getCurrentUser();
     const buyer = {
-        name: 'Amal Ben Ali',
+        name: getUserDisplayName(currentBuyerUser, 'Acheteur FoodLoop'),
         zone: 'Tunis Centre',
         preferredCategories: ['Epicerie', 'Frais', 'Boulangerie']
     };
 
-    const dashboardProducts = [
-        {
-            id: 1,
-            title: 'Panier fruits & legumes',
-            description: 'Selection fraiche de saison pour une reservation rapide et solidaire.',
-            location: 'Tunis Centre',
-            zone: 'Tunis',
-            category: 'Epicerie',
-            distance: 2,
-            price: '3.90 DT',
-            pickupTime: '17:30 - 19:00',
-            image: 'https://images.unsplash.com/photo-1765480953875-a7338f896e91?auto=format&fit=crop&fm=jpg&q=80&w=1200'
-        },
-        {
-            id: 2,
-            title: 'Viennoiseries du matin',
-            description: 'Lot gourmand de croissants et mini brioches a petit prix.',
-            location: 'La Marsa',
-            zone: 'La Marsa',
-            category: 'Boulangerie',
-            distance: 5,
-            price: '2.50 DT',
-            pickupTime: '18:00 - 19:30',
-            image: 'https://images.unsplash.com/photo-1774043132154-8934327dee3a?auto=format&fit=crop&fm=jpg&q=80&w=1200'
-        },
-        {
-            id: 3,
-            title: 'Repas chauds solidaires',
-            description: 'Portions cuisinees disponibles pour recuperation avant fermeture.',
-            location: 'Sfax Medina',
-            zone: 'Sfax',
-            category: 'Restauration',
-            distance: 8,
-            price: '4.20 DT',
-            pickupTime: '12:30 - 14:00',
-            image: 'https://images.unsplash.com/photo-1568897798550-91c8caffe391?auto=format&fit=crop&fm=jpg&q=80&w=1200'
-        },
-        {
-            id: 4,
-            title: 'Produits frais du soir',
-            description: 'Yaourts, desserts et salades a tres petit prix.',
-            location: 'Sousse Ville',
-            zone: 'Sousse',
-            category: 'Frais',
-            distance: 3,
-            price: '2.10 DT',
-            pickupTime: '19:00 - 20:00',
-            image: 'https://images.unsplash.com/photo-1612383277710-67896ecf4c69?auto=format&fit=crop&fm=jpg&q=80&w=1200'
-        },
-        {
-            id: 5,
-            title: 'Lot epicerie locale',
-            description: 'Produits secs et conserves proches de la date optimale.',
-            location: 'Monastir',
-            zone: 'Monastir',
-            category: 'Epicerie',
-            distance: 6,
-            price: '3.10 DT',
-            pickupTime: '16:00 - 18:30',
-            image: 'https://images.unsplash.com/photo-1584093092919-3d551a9c5055?auto=format&fit=crop&fm=jpg&q=80&w=1200'
-        },
-        {
-            id: 6,
-            title: 'Box repas vegetarienne',
-            description: 'Legumes rotis, riz et sauce maison dans une box prete a retirer.',
-            location: 'Ariana',
-            zone: 'Ariana',
-            category: 'Restauration',
-            distance: 4,
-            price: '4.50 DT',
-            pickupTime: '13:00 - 15:00',
-            image: 'https://images.unsplash.com/photo-1568897798550-91c8caffe391?auto=format&fit=crop&fm=jpg&q=80&w=1200'
-        }
-    ];
+    const dashboardProducts = [];
+
+    applyStoredStockToProducts(dashboardProducts);
 
     const dashboardState = {
         currentView: 'profile',
         cart: loadStoredCart(),
-        notifications: [
-            { id: 1, title: 'Reservation confirmee', message: 'Votre panier fruits & legumes est confirme pour 18h00.' },
-            { id: 2, title: 'Rappel pickup', message: 'N oubliez pas de recuperer votre lot de viennoiseries avant 19h.' },
-            { id: 3, title: 'Message admin', message: 'Un nouveau point de collecte est disponible a Tunis Centre.' }
-        ],
-        reservations: [1, 4],
-        history: [2]
+        notifications: loadOwnedScopedArray(buyerNotificationsKey, [], currentBuyerUser),
+        reservations: loadOwnedScopedArray(buyerReservationsKey, [], currentBuyerUser),
+        history: loadOwnedScopedArray(buyerHistoryKey, [], currentBuyerUser)
     };
 
     const dashboardSearch = document.querySelector('#dashboardSearch');
@@ -822,22 +1575,28 @@ if (buyerDashboard && requireRole('acheteur')) {
     const panelTitle = document.querySelector('#panelTitle');
     const panelContent = document.querySelector('#panelContent');
     const sidebarLinks = document.querySelectorAll('.sidebar-link');
+    const buyerNameElement = document.querySelector('#buyerName');
+    const buyerZoneElement = document.querySelector('#buyerZone');
+    const buyerAvatarElement = document.querySelector('.profile-avatar');
+
+    if (buyerNameElement) {
+        buyerNameElement.textContent = buyer.name;
+    }
+
+    if (buyerZoneElement) {
+        buyerZoneElement.textContent = buyer.zone;
+    }
+
+    if (buyerAvatarElement) {
+        buyerAvatarElement.textContent = getUserInitials(buyer.name, 'A');
+    }
 
     function loadStoredCart() {
-        try {
-            const raw = window.localStorage.getItem(cartStorageKey);
-            if (!raw) {
-                return [];
-            }
-            const parsed = JSON.parse(raw);
-            return Array.isArray(parsed) ? parsed : [];
-        } catch (error) {
-            return [];
-        }
+        return loadOwnedScopedArray(cartStorageKey, [], currentBuyerUser);
     }
 
     function persistCart() {
-        window.localStorage.setItem(cartStorageKey, JSON.stringify(dashboardState.cart));
+        persistScopedArray(cartStorageKey, dashboardState.cart, currentBuyerUser);
     }
 
     function populateDashboardFilters() {
@@ -866,6 +1625,7 @@ if (buyerDashboard && requireRole('acheteur')) {
         const distance = distanceSelect.value === '' ? null : Number(distanceSelect.value);
 
         return sourceProducts.filter((product) => {
+            const isReservable = product.isReservable !== false;
             const matchesTerm =
                 term === '' ||
                 product.title.toLowerCase().includes(term) ||
@@ -877,7 +1637,7 @@ if (buyerDashboard && requireRole('acheteur')) {
             const matchesCategory = category === '' || product.category === category;
             const matchesDistance = distance === null || product.distance <= distance;
 
-            return matchesTerm && matchesZone && matchesCategory && matchesDistance;
+            return isReservable && matchesTerm && matchesZone && matchesCategory && matchesDistance;
         });
     }
 
@@ -888,7 +1648,7 @@ if (buyerDashboard && requireRole('acheteur')) {
                 <div class="dashboard-product-body">
                     <div class="dashboard-meta-row">
                         <span>${product.category}</span>
-                        <span>${product.distance} km</span>
+                        <span class="stock-pill">Stock: ${product.stock}</span>
                     </div>
                     <h3>${product.title}</h3>
                     <p>${product.description}</p>
@@ -897,7 +1657,8 @@ if (buyerDashboard && requireRole('acheteur')) {
                         <span class="price-tag">${product.price}</span>
                     </div>
                     <p class="pickup-time">Pickup time: ${product.pickupTime}</p>
-                    <button class="dashboard-primary-button" type="button" data-reserve-product="${product.id}">Reserver</button>
+                    <p class="inline-note">Distance: ${product.distance} km</p>
+                    <button class="dashboard-primary-button" type="button" data-reserve-product="${product.id}" ${product.isReservable === false || product.stock <= 0 ? 'disabled' : ''}>${product.isReservable === false || product.stock <= 0 ? 'Indisponible' : 'Reserver'}</button>
                 </div>
             </article>
         `;
@@ -932,9 +1693,7 @@ if (buyerDashboard && requireRole('acheteur')) {
     }
 
     function renderReservations() {
-        const reserved = dashboardProducts.filter((product) =>
-            dashboardState.reservations.includes(product.id) || dashboardState.cart.some((item) => item.id === product.id)
-        );
+        const reserved = [...dashboardState.cart, ...dashboardState.reservations];
 
         if (reserved.length === 0) {
             contentRoot.innerHTML = '<div class="dashboard-empty">Aucune reservation active pour le moment.</div>';
@@ -945,8 +1704,9 @@ if (buyerDashboard && requireRole('acheteur')) {
             <article class="reservation-card">
                 <h3>${product.title}</h3>
                 <p>${product.location} · ${product.price}</p>
+                <p class="reservation-meta">Quantite: ${product.quantity || 1}</p>
                 <p class="pickup-time">Pickup time: ${product.pickupTime}</p>
-                <p>Retrait conseille sous ${product.distance} km.</p>
+                <p>${product.status || 'Reservation en attente'}</p>
             </article>
         `).join('')}</div>`;
     }
@@ -962,7 +1722,7 @@ if (buyerDashboard && requireRole('acheteur')) {
     }
 
     function renderHistory() {
-        const historyItems = dashboardProducts.filter((product) => dashboardState.history.includes(product.id));
+        const historyItems = dashboardState.history;
         if (historyItems.length === 0) {
             contentRoot.innerHTML = '<div class="dashboard-empty">Votre historique est encore vide.</div>';
             return;
@@ -973,6 +1733,7 @@ if (buyerDashboard && requireRole('acheteur')) {
                 <h3>${product.title}</h3>
                 <p>${product.description}</p>
                 <p>${product.location} · ${product.price}</p>
+                <p class="reservation-meta">Quantite: ${product.quantity || 1}</p>
                 <p class="pickup-time">Pickup time: ${product.pickupTime}</p>
             </article>
         `).join('')}</div>`;
@@ -1055,13 +1816,22 @@ if (buyerDashboard && requireRole('acheteur')) {
         }
     }
 
+    registerReservationRealtimeHandlers(() => {
+        applyStoredStockToProducts(dashboardProducts);
+        renderCurrentView();
+    });
+
     function addToCart(productId) {
         if (!dashboardState.cart.some((item) => item.id === productId)) {
             const product = dashboardProducts.find((item) => item.id === productId);
-            if (!product) {
+            if (!product || product.stock <= 0 || product.isReservable === false) {
                 return;
             }
-            dashboardState.cart.push(product);
+            dashboardState.cart.push(attachOwnership({
+                ...product,
+                stock: product.stock,
+                isReservable: product.isReservable !== false
+            }, currentBuyerUser));
             persistCart();
             updateBadges();
         }
@@ -1129,9 +1899,28 @@ if (buyerDashboard && requireRole('acheteur')) {
                     <button id="confirmReservationButton" class="panel-confirm-button" type="button">Confirmer réservation</button>
                 </div>
             `);
-            document.querySelector('#confirmReservationButton')?.addEventListener('click', () => {
-                setCheckoutState(dashboardState.cart, 'buyer_dashboard.html');
-                window.location.href = 'payment.html';
+            document.querySelector('#confirmReservationButton')?.addEventListener('click', async () => {
+                try {
+                    const reservableCartItems = dashboardState.cart.filter((item) => item.isReservable !== false && Number(item.stock) > 0);
+                    if (reservableCartItems.length === 0) {
+                        throw new Error('Aucun produit du panier n est encore reservable.');
+                    }
+
+                    const reservedItems = await createReservationsFromCart(reservableCartItems.map((item) => ({
+                        ...item,
+                        quantity: 1
+                    })));
+                    updateProductStockInView(dashboardProducts, reservedItems);
+                    broadcastReservationEvent(reservedItems);
+                    await showDesktopNotification(
+                        'Nouvelle reservation FoodLoop',
+                        `${reservedItems.length} reservation(s) enregistree(s).`
+                    );
+                    setCheckoutState(reservedItems, pageRoutes.buyer);
+                    window.location.href = pageRoutes.payment;
+                } catch (error) {
+                    panelContent.insertAdjacentHTML('beforeend', `<p class="inline-error">${error instanceof Error ? error.message : 'Reservation impossible.'}</p>`);
+                }
             });
         }
     });
@@ -1146,8 +1935,8 @@ if (buyerDashboard && requireRole('acheteur')) {
     });
 
     logoutButton.addEventListener('click', () => {
-        window.localStorage.clear();
-        window.location.href = 'homepage.html';
+        clearApplicationState();
+        window.location.href = pageRoutes.logout;
     });
 
     panel.addEventListener('click', (event) => {
@@ -1157,109 +1946,35 @@ if (buyerDashboard && requireRole('acheteur')) {
         }
     });
 
-    populateDashboardFilters();
     updateBadges();
     renderCurrentView();
+    loadFeedProducts()
+        .then((items) => {
+            dashboardProducts.splice(0, dashboardProducts.length, ...items);
+            zoneSelect.innerHTML = '<option value="">Toutes</option>';
+            categorySelect.innerHTML = '<option value="">Toutes</option>';
+            populateDashboardFilters();
+            renderCurrentView();
+        })
+        .catch(() => {
+            renderCurrentView();
+        });
 }
 
 if (adminAssociationDashboard && requireRole('admin_association')) {
     const userRole = 'admin_association';
-    let cart = loadStoredArray(adminCartStorageKey);
-    const products = [
-        {
-            id: 101,
-            title: 'Lots fruits solidaires',
-            description: 'Caisses de fruits de saison prevues pour une distribution associative rapide.',
-            location: 'Tunis Centre',
-            zone: 'Tunis',
-            category: 'Epicerie',
-            distance: 2,
-            price: '2.90 DT',
-            pickupTime: '17:00 - 19:30',
-            stock: 12,
-            image: 'https://images.unsplash.com/photo-1765480953875-a7338f896e91?auto=format&fit=crop&fm=jpg&q=80&w=1200'
-        },
-        {
-            id: 102,
-            title: 'Plateaux repas families',
-            description: 'Portions cuisinees pretes a etre reparties en plusieurs kits de distribution.',
-            location: 'Ariana',
-            zone: 'Ariana',
-            category: 'Restauration',
-            distance: 4,
-            price: '4.60 DT',
-            pickupTime: '12:30 - 14:30',
-            stock: 18,
-            image: 'https://images.unsplash.com/photo-1568897798550-91c8caffe391?auto=format&fit=crop&fm=jpg&q=80&w=1200'
-        },
-        {
-            id: 103,
-            title: 'Pains artisanaux invendus',
-            description: 'Baguettes, pains complets et fougasses proposes avec remise association.',
-            location: 'La Marsa',
-            zone: 'La Marsa',
-            category: 'Boulangerie',
-            distance: 5,
-            price: '1.90 DT',
-            pickupTime: '18:00 - 20:00',
-            stock: 20,
-            image: 'https://images.unsplash.com/photo-1774043132154-8934327dee3a?auto=format&fit=crop&fm=jpg&q=80&w=1200'
-        },
-        {
-            id: 104,
-            title: 'Desserts frais associations',
-            description: 'Lots de yaourts et desserts a retirer pour vos points de collecte.',
-            location: 'Sousse Ville',
-            zone: 'Sousse',
-            category: 'Frais',
-            distance: 3,
-            price: '2.30 DT',
-            pickupTime: '19:00 - 20:30',
-            stock: 10,
-            image: 'https://images.unsplash.com/photo-1612383277710-67896ecf4c69?auto=format&fit=crop&fm=jpg&q=80&w=1200'
-        },
-        {
-            id: 105,
-            title: 'Epicerie longue conservation',
-            description: 'Pates, conserves et biscuits en lots dedies aux reseaux associatifs.',
-            location: 'Monastir',
-            zone: 'Monastir',
-            category: 'Epicerie',
-            distance: 6,
-            price: '3.40 DT',
-            pickupTime: '15:30 - 18:00',
-            stock: 16,
-            image: 'https://images.unsplash.com/photo-1584093092919-3d551a9c5055?auto=format&fit=crop&fm=jpg&q=80&w=1200'
-        },
-        {
-            id: 106,
-            title: 'Offre partenaire grand volume',
-            description: 'Lots premium avec reduction reservee aux associations partenaires.',
-            location: 'Sfax Medina',
-            zone: 'Sfax',
-            category: 'Restauration',
-            distance: 8,
-            price: '3.80 DT',
-            pickupTime: '11:30 - 13:30',
-            stock: 24,
-            image: 'https://images.unsplash.com/photo-1547592180-85f173990554?auto=format&fit=crop&fm=jpg&q=80&w=1200'
-        }
-    ];
+    const currentAssociationUser = getCurrentUser();
+    const adminNotificationsKey = 'foodloopAdminAssociationNotifications';
+    const adminReservationsKey = 'foodloopAdminAssociationReservations';
+    const adminHistoryKey = 'foodloopAdminAssociationHistory';
+    let cart = loadOwnedScopedArray(adminCartStorageKey, [], currentAssociationUser);
+    const products = [];
 
     const adminState = {
         currentView: 'products',
-        notifications: [
-            { id: 1, title: 'Offre reservee', message: 'Une remise de 15% est active sur les lots grand volume aujourd hui.' },
-            { id: 2, title: 'Collecte prioritaire', message: 'Votre association dispose d un retrait prioritaire a Tunis Centre de 17h a 19h30.' }
-        ],
-        reservations: [
-            { id: 102, quantity: 4 },
-            { id: 104, quantity: 2 }
-        ],
-        history: [
-            { id: 103, quantity: 6 },
-            { id: 105, quantity: 3 }
-        ]
+        notifications: loadOwnedScopedArray(adminNotificationsKey, [], currentAssociationUser),
+        reservations: loadOwnedScopedArray(adminReservationsKey, [], currentAssociationUser),
+        history: loadOwnedScopedArray(adminHistoryKey, [], currentAssociationUser)
     };
 
     const dashboardSearch = document.querySelector('#adminDashboardSearch');
@@ -1281,9 +1996,20 @@ if (adminAssociationDashboard && requireRole('admin_association')) {
     const panelContent = document.querySelector('#adminPanelContent');
     const sidebarLinks = document.querySelectorAll('[data-admin-view]');
     const feedControls = document.querySelector('#adminFeedControls');
+    const adminAssociationNameElement = document.querySelector('#adminAssociationName');
+    const adminAssociationAvatarElement = document.querySelector('#adminAssociationDashboard .profile-avatar');
+    const adminAssociationDisplayName = getUserDisplayName(currentAssociationUser, 'Association FoodLoop');
+
+    if (adminAssociationNameElement) {
+        adminAssociationNameElement.textContent = adminAssociationDisplayName;
+    }
+
+    if (adminAssociationAvatarElement) {
+        adminAssociationAvatarElement.textContent = getUserInitials(adminAssociationDisplayName, 'AA');
+    }
 
     function persistCart() {
-        persistStoredArray(adminCartStorageKey, cart);
+        persistScopedArray(adminCartStorageKey, cart, currentAssociationUser);
     }
 
     function populateDashboardFilters() {
@@ -1334,6 +2060,7 @@ if (adminAssociationDashboard && requireRole('admin_association')) {
         const distance = distanceSelect.value === '' ? null : Number(distanceSelect.value);
 
         return sourceProducts.filter((product) => {
+            const isReservable = product.isReservable !== false;
             const matchesTerm =
                 term === '' ||
                 product.title.toLowerCase().includes(term) ||
@@ -1345,7 +2072,7 @@ if (adminAssociationDashboard && requireRole('admin_association')) {
             const matchesCategory = category === '' || product.category === category;
             const matchesDistance = distance === null || product.distance <= distance;
 
-            return matchesTerm && matchesZone && matchesCategory && matchesDistance;
+            return isReservable && matchesTerm && matchesZone && matchesCategory && matchesDistance;
         });
     }
 
@@ -1370,7 +2097,7 @@ if (adminAssociationDashboard && requireRole('admin_association')) {
                             <span>Quantite</span>
                             <input id="quantity-${product.id}" type="number" min="1" max="${product.stock}" value="1" data-quantity-input="${product.id}">
                         </label>
-                        <button class="dashboard-primary-button" type="button" data-reserve-product="${product.id}">Reserver</button>
+                        <button class="dashboard-primary-button" type="button" data-reserve-product="${product.id}" ${product.isReservable === false || product.stock <= 0 ? 'disabled' : ''}>${product.isReservable === false || product.stock <= 0 ? 'Indisponible' : 'Reserver'}</button>
                     </div>
                     <p class="inline-note">Distance: ${product.distance} km</p>
                     <p class="inline-error" data-quantity-error="${product.id}" hidden></p>
@@ -1395,17 +2122,12 @@ if (adminAssociationDashboard && requireRole('admin_association')) {
         }
 
         const reservationCards = adminState.reservations.map((entry) => {
-            const product = products.find((item) => item.id === entry.id);
-            if (!product) {
-                return '';
-            }
-
             return `
                 <article class="reservation-card">
-                    <h3>${product.title}</h3>
-                    <p>${product.location} · ${product.price}</p>
+                    <h3>${entry.title}</h3>
+                    <p>${entry.location} · ${entry.price}</p>
                     <p class="reservation-meta">Quantite reservee: ${entry.quantity}</p>
-                    <p class="pickup-time">Pickup time: ${product.pickupTime}</p>
+                    <p class="pickup-time">Pickup time: ${entry.pickupTime}</p>
                 </article>
             `;
         }).join('');
@@ -1437,18 +2159,13 @@ if (adminAssociationDashboard && requireRole('admin_association')) {
         }
 
         contentRoot.innerHTML = `<div class="history-list">${adminState.history.map((entry) => {
-            const product = products.find((item) => item.id === entry.id);
-            if (!product) {
-                return '';
-            }
-
             return `
                 <article class="history-card">
-                    <h3>${product.title}</h3>
-                    <p>${product.description}</p>
-                    <p>${product.location} · ${product.price}</p>
+                    <h3>${entry.title}</h3>
+                    <p>${entry.description || ''}</p>
+                    <p>${entry.location} · ${entry.price}</p>
                     <p class="reservation-meta">Quantite retiree: ${entry.quantity}</p>
-                    <p class="pickup-time">Pickup time: ${product.pickupTime}</p>
+                    <p class="pickup-time">Pickup time: ${entry.pickupTime}</p>
                 </article>
             `;
         }).join('')}</div>`;
@@ -1550,22 +2267,26 @@ if (adminAssociationDashboard && requireRole('admin_association')) {
         }
 
         const product = products.find((item) => item.id === productId);
-        if (!product) {
+        if (!product || product.isReservable === false || product.stock <= 0) {
             return;
         }
 
         const existingItem = cart.find((item) => item.id === productId);
         if (existingItem) {
             existingItem.quantity = quantity;
+            existingItem.stock = product.stock;
+            existingItem.isReservable = product.isReservable !== false;
         } else {
-            cart.push({
+            cart.push(attachOwnership({
                 id: product.id,
                 title: product.title,
                 quantity,
                 price: product.price,
                 pickupTime: product.pickupTime,
-                location: product.location
-            });
+                location: product.location,
+                stock: product.stock,
+                isReservable: product.isReservable !== false
+            }, currentAssociationUser));
         }
 
         updateCart();
@@ -1613,6 +2334,11 @@ if (adminAssociationDashboard && requireRole('admin_association')) {
         }
     }
 
+    registerReservationRealtimeHandlers(() => {
+        applyStoredStockToProducts(products);
+        renderCurrentView();
+    });
+
     dashboardSearch.addEventListener('input', renderCurrentView);
     feedSearch.addEventListener('input', renderCurrentView);
     zoneSelect.addEventListener('change', renderCurrentView);
@@ -1659,9 +2385,25 @@ if (adminAssociationDashboard && requireRole('admin_association')) {
             </div>
         `);
 
-        document.querySelector('#confirmAdminReservationButton')?.addEventListener('click', () => {
-            setCheckoutState(cart, 'admin_association_dashboard.html');
-            window.location.href = 'payment.html';
+        document.querySelector('#confirmAdminReservationButton')?.addEventListener('click', async () => {
+            try {
+                const reservableCartItems = cart.filter((item) => item.isReservable !== false && Number(item.stock) > 0);
+                if (reservableCartItems.length === 0) {
+                    throw new Error('Aucun produit du panier n est encore reservable.');
+                }
+
+                const reservedItems = await createReservationsFromCart(reservableCartItems);
+                updateProductStockInView(products, reservedItems);
+                broadcastReservationEvent(reservedItems);
+                await showDesktopNotification(
+                    'Nouvelle reservation FoodLoop',
+                    `${reservedItems.length} reservation(s) enregistree(s).`
+                );
+                setCheckoutState(reservedItems, pageRoutes.association);
+                window.location.href = pageRoutes.payment;
+            } catch (error) {
+                panelContent.insertAdjacentHTML('beforeend', `<p class="inline-error">${error instanceof Error ? error.message : 'Reservation impossible.'}</p>`);
+            }
         });
     });
 
@@ -1678,8 +2420,8 @@ if (adminAssociationDashboard && requireRole('admin_association')) {
     });
 
     logoutButton.addEventListener('click', () => {
-        window.localStorage.clear();
-        window.location.href = 'homepage.html';
+        clearApplicationState();
+        window.location.href = pageRoutes.logout;
     });
 
     panel.addEventListener('click', (event) => {
@@ -1689,69 +2431,36 @@ if (adminAssociationDashboard && requireRole('admin_association')) {
         }
     });
 
-    populateDashboardFilters();
     updateCart();
     renderCurrentView();
+    loadFeedProducts()
+        .then((items) => {
+            products.splice(0, products.length, ...items);
+            zoneSelect.innerHTML = '<option value="">Toutes</option>';
+            categorySelect.innerHTML = '<option value="">Toutes</option>';
+            populateDashboardFilters();
+            renderCurrentView();
+        })
+        .catch(() => {
+            renderCurrentView();
+        });
 }
 
 if (merchantDashboard && requireRole('commerce')) {
-    const products = [
-        {
-            id: 201,
-            title: 'Panier boulangerie du soir',
-            description: 'Assortiment de pains et viennoiseries a recuperer avant fermeture.',
-            foodType: 'Boulangerie',
-            quantity: 10,
-            unit: 'pcs',
-            location: 'Tunis Centre',
-            status: 'Reserved',
-            price: '3.20 DT',
-            pickupTime: '18:30',
-            paymentMethod: 'Card'
-        },
-        {
-            id: 202,
-            title: 'Box legumes prets a cuisiner',
-            description: 'Selection de legumes frais en lots rapides a reserver.',
-            foodType: 'Fruits & legumes',
-            quantity: 6,
-            unit: 'box',
-            location: 'La Marsa',
-            status: 'Reserved',
-            price: '4.10 DT',
-            pickupTime: '19:10',
-            paymentMethod: 'On-site'
-        }
-    ];
-
-    const history = [
-        {
-            id: 190,
-            title: 'Repas du midi invendus',
-            description: 'Portions pretes a retirer en fin de service.',
-            foodType: 'Restauration',
-            quantity: 8,
-            unit: 'pcs',
-            location: 'Ariana',
-            status: 'Picked-up',
-            price: '5.50 DT',
-            pickupTime: '18:30',
-            paymentMethod: 'Card'
-        }
-    ];
-
-    const reservations = [
-        { id: 201, customer: 'Association El Amal', quantity: 10, status: 'Reserved' },
-        { id: 202, customer: 'Collectif Nourrir', quantity: 5, status: 'Reserved' }
-    ];
+    const currentMerchantUser = getCurrentUser();
+    const merchantProductsKey = 'foodloopMerchantProducts';
+    const merchantHistoryKey = 'foodloopMerchantHistory';
+    const merchantReservationsKey = 'foodloopMerchantReservations';
+    const merchantNotificationsKey = 'foodloopMerchantNotifications';
+    const products = [];
+    const history = loadOwnedScopedArray(merchantHistoryKey, [], currentMerchantUser);
+    const reservations = loadOwnedScopedArray(merchantReservationsKey, [], currentMerchantUser);
 
     const merchantState = {
         currentView: 'publish',
-        notifications: [
-            { id: 1, title: 'Nouvelle reservation', message: 'Association El Amal a reserve 10 pcs pour Panier boulangerie du soir.' },
-            { id: 2, title: 'Rappel pickup', message: 'Le retrait de Box legumes prets a cuisiner est prevu a 19:10.' }
-        ],
-        lastPublishMessage: ''
+        notifications: loadOwnedScopedArray(merchantNotificationsKey, [], currentMerchantUser),
+        lastPublishMessage: '',
+        lastPublishError: ''
     };
 
     const contentRoot = document.querySelector('#merchantDashboardContent');
@@ -1765,6 +2474,17 @@ if (merchantDashboard && requireRole('commerce')) {
     const panelTitle = document.querySelector('#merchantPanelTitle');
     const panelContent = document.querySelector('#merchantPanelContent');
     const sidebarLinks = document.querySelectorAll('[data-merchant-view]');
+    const merchantNameElement = document.querySelector('#merchantDashboard .profile-card strong');
+    const merchantAvatarElement = document.querySelector('#merchantDashboard .profile-avatar');
+    const merchantDisplayName = getUserDisplayName(currentMerchantUser, 'Commerce FoodLoop');
+
+    if (merchantNameElement) {
+        merchantNameElement.textContent = merchantDisplayName;
+    }
+
+    if (merchantAvatarElement) {
+        merchantAvatarElement.textContent = getUserInitials(merchantDisplayName, 'CF');
+    }
 
     function updateHeaderForView() {
         const copy = {
@@ -1817,6 +2537,12 @@ if (merchantDashboard && requireRole('commerce')) {
         notificationCount.textContent = String(merchantState.notifications.length);
     }
 
+    function persistMerchantState() {
+        persistScopedArray(merchantHistoryKey, history, currentMerchantUser);
+        persistScopedArray(merchantReservationsKey, reservations, currentMerchantUser);
+        persistScopedArray(merchantNotificationsKey, merchantState.notifications, currentMerchantUser);
+    }
+
     function productCardMarkup(product) {
         const reservation = reservations.find((item) => item.id === product.id);
         const reservedQuantity = reservation ? reservation.quantity : product.quantity;
@@ -1832,6 +2558,7 @@ if (merchantDashboard && requireRole('commerce')) {
                     <p>Type: ${product.foodType}</p>
                     <p>Quantite: ${reservedQuantity} ${product.unit}</p>
                     <p>Localisation: ${product.location}</p>
+                    <p>Prix: ${product.price}</p>
                     <p class="pickup-time">Pickup time: ${product.pickupTime}</p>
                 </div>
                 <button class="dashboard-primary-button" type="button" data-picked-up="${product.id}">Picked-up</button>
@@ -1897,11 +2624,16 @@ if (merchantDashboard && requireRole('commerce')) {
                             <span>Localisation</span>
                             <input type="text" name="location" placeholder="Tunis Centre" required>
                         </label>
+                        <label class="merchant-field">
+                            <span>Prix</span>
+                            <input type="number" name="price" min="0" step="0.01" placeholder="3.50" required>
+                        </label>
                     </div>
                     <div class="merchant-submit-row">
                         <button class="dashboard-primary-button" type="submit">Publier</button>
                     </div>
                     ${merchantState.lastPublishMessage ? `<p class="inline-success">${merchantState.lastPublishMessage}</p>` : ''}
+                    ${merchantState.lastPublishError ? `<p class="inline-error">${merchantState.lastPublishError}</p>` : ''}
                 </form>
             </article>
         `;
@@ -1950,38 +2682,38 @@ if (merchantDashboard && requireRole('commerce')) {
         renderCharts();
     }
 
-    function publishProduct(formData) {
+    async function publishProduct(formData) {
         const quantity = Number(formData.get('quantity'));
-        const id = Date.now();
-        const product = {
-            id,
-            title: String(formData.get('title')).trim(),
-            description: String(formData.get('description')).trim(),
-            foodType: String(formData.get('foodType')).trim(),
-            quantity,
-            unit: String(formData.get('unit')).trim(),
-            location: String(formData.get('location')).trim(),
-            status: 'Reserved',
-            price: `${(2 + quantity * 0.35).toFixed(2)} DT`,
-            pickupTime: `${String(17 + Math.min(quantity, 3)).padStart(2, '0')}:30`,
-            paymentMethod: Math.random() > 0.5 ? 'Card' : 'On-site'
-        };
+        const title = String(formData.get('title')).trim();
+        const description = String(formData.get('description')).trim();
+        const foodType = String(formData.get('foodType')).trim();
+        const unit = String(formData.get('unit')).trim();
+        const location = String(formData.get('location')).trim();
+        const submittedPrice = Number(formData.get('price'));
+        const normalizedPrice = Number.isFinite(submittedPrice) ? submittedPrice : 0;
+        const pickupHour = String(17 + Math.min(quantity, 3)).padStart(2, '0');
+        const pickupTime = `${pickupHour}:30`;
 
-        const reservation = {
-            id,
-            customer: 'Reservation en attente',
-            quantity,
-            status: 'Reserved'
-        };
+        const phpFormData = new FormData();
+        phpFormData.append('titre', title);
+        phpFormData.append('description', description);
+        phpFormData.append('type', foodType);
+        phpFormData.append('quantite', String(quantity));
+        phpFormData.append('unite', unit);
+        phpFormData.append('localisation', location);
+        phpFormData.append('prix', normalizedPrice.toFixed(2));
+        phpFormData.append('pickup_time', `${new Date().toISOString().slice(0, 10)} ${pickupTime}:00`);
 
-        products.unshift(product);
-        reservations.unshift(reservation);
-        merchantState.lastPublishMessage = `Annonce publiee: ${product.title}`;
-        merchantState.notifications.unshift({
+        await postToPhpEndpoint(apiEndpoints.createProduct, phpFormData);
+        const freshProducts = await loadMerchantAnnouncements();
+        products.splice(0, products.length, ...freshProducts);
+        merchantState.lastPublishMessage = `Annonce publiee: ${title}`;
+        merchantState.lastPublishError = '';
+        merchantState.notifications.unshift(attachOwnership({
             id: Date.now() + 1,
             title: 'Annonce publiee',
-            message: `${product.title} a ete ajoutee a vos annonces actives.`
-        });
+            message: `${title} a ete ajoutee a vos annonces actives.`
+        }, currentMerchantUser));
         updateNotifications();
     }
 
@@ -1994,6 +2726,7 @@ if (merchantDashboard && requireRole('commerce')) {
         const [product] = products.splice(productIndex, 1);
         product.status = 'Picked-up';
         history.unshift(product);
+        persistMerchantState();
     }
 
     function markPickedUp(productId) {
@@ -2011,11 +2744,12 @@ if (merchantDashboard && requireRole('commerce')) {
 
         const movedProduct = history[0];
         if (movedProduct) {
-            merchantState.notifications.unshift({
+            merchantState.notifications.unshift(attachOwnership({
                 id: Date.now() + 2,
                 title: 'Pickup confirme',
                 message: `${movedProduct.title} a ete marquee comme retiree.`
-            });
+            }, currentMerchantUser));
+            persistMerchantState();
             updateNotifications();
         }
     }
@@ -2127,6 +2861,17 @@ if (merchantDashboard && requireRole('commerce')) {
         }
     }
 
+    registerReservationRealtimeHandlers(() => {
+        loadMerchantAnnouncements()
+            .then((items) => {
+                products.splice(0, products.length, ...items);
+                renderCurrentView();
+            })
+            .catch(() => {
+                renderCurrentView();
+            });
+    });
+
     sidebarLinks.forEach((link) => {
         link.addEventListener('click', () => {
             merchantState.currentView = link.getAttribute('data-merchant-view') || 'publish';
@@ -2134,15 +2879,20 @@ if (merchantDashboard && requireRole('commerce')) {
         });
     });
 
-    contentRoot.addEventListener('submit', (event) => {
+    contentRoot.addEventListener('submit', async (event) => {
         event.preventDefault();
         const form = event.target;
         if (!(form instanceof HTMLFormElement) || form.id !== 'merchantPublishForm') {
             return;
         }
 
-        publishProduct(new FormData(form));
-        form.reset();
+        try {
+            await publishProduct(new FormData(form));
+            form.reset();
+        } catch (error) {
+            merchantState.lastPublishMessage = '';
+            merchantState.lastPublishError = error instanceof Error ? error.message : 'Publication impossible.';
+        }
         renderCurrentView();
     });
 
@@ -2171,8 +2921,8 @@ if (merchantDashboard && requireRole('commerce')) {
     });
 
     logoutButton.addEventListener('click', () => {
-        window.localStorage.clear();
-        window.location.href = 'homepage.html';
+        clearApplicationState();
+        window.location.href = pageRoutes.logout;
     });
 
     panel.addEventListener('click', (event) => {
@@ -2183,54 +2933,18 @@ if (merchantDashboard && requireRole('commerce')) {
     });
 
     updateNotifications();
+    loadMerchantAnnouncements()
+        .then((items) => {
+            products.splice(0, products.length, ...items);
+            renderCurrentView();
+        })
+        .catch(() => {
+            renderCurrentView();
+        });
     renderCurrentView();
 }
 
 if (superadminDashboard && requireRole('superadmin')) {
-    const buyers = [
-        { id: 1, name: 'Ahmed Trabelsi', email: 'ahmed@foodloop.com', status: 'Actif' },
-        { id: 2, name: 'Sarah Ben Amor', email: 'sarah@foodloop.com', status: 'Actif' },
-        { id: 3, name: 'Youssef Jaziri', email: 'youssef@foodloop.com', status: 'Suspendu' }
-    ];
-
-    const commerces = [
-        { id: 11, name: 'Bakery X', type: 'Boulangerie', status: 'Actif' },
-        { id: 12, name: 'Green Shop', type: 'Epicerie', status: 'Actif' },
-        { id: 13, name: 'Resto Medina', type: 'Restauration', status: 'Suspendu' }
-    ];
-
-    const associations = [
-        { id: 21, name: 'Assoc El Amal', email: 'contact@elamal.org', status: 'Valide' },
-        { id: 22, name: 'Solidarite Plus', email: 'hello@solidarite.org', status: 'Pending' },
-        { id: 23, name: 'Food Care', email: 'team@foodcare.org', status: 'Suspendu' }
-    ];
-
-    const reports = [
-        { id: 31, type: 'annonce', subject: 'Food X', reason: 'Spam', status: 'Ouvert' },
-        { id: 32, type: 'acheteur', subject: 'Ahmed Trabelsi', reason: 'Abus', status: 'Ouvert' },
-        { id: 33, type: 'association', subject: 'Solidarite Plus', reason: 'Documents manquants', status: 'Ouvert' }
-    ];
-
-    const adminState = {
-        currentView: 'global',
-        reservationsTotal: 248,
-        notifications: [
-            { id: 1, title: 'Signalement critique', message: 'Une annonce a ete signalee pour spam et attend moderation.' },
-            { id: 2, title: 'Association en attente', message: 'Solidarite Plus attend une validation de compte.' },
-            { id: 3, title: 'Systeme', message: 'Le monitoring indique un pic d activite sur les reservations.' }
-        ],
-        systemLogs: [
-            { id: 1, title: 'Connexion superadmin', message: 'Session ouverte a 08:14 par superadmin principal.' },
-            { id: 2, title: 'Suspension commerce', message: 'Resto Medina a ete suspendu suite a plusieurs signalements.' },
-            { id: 3, title: 'Validation association', message: 'Assoc El Amal a ete validee apres verification des documents.' }
-        ],
-        liveMonitoring: [
-            { id: 1, label: 'Uptime systeme', value: '99.98%' },
-            { id: 2, label: 'Activite temps reel', value: '184 utilisateurs connectes' },
-            { id: 3, label: 'Queue moderation', value: '3 signalements ouverts' }
-        ]
-    };
-
     const contentRoot = document.querySelector('#superadminDashboardContent');
     const viewTitle = document.querySelector('#superadminViewTitle');
     const viewDescription = document.querySelector('#superadminViewDescription');
@@ -2243,6 +2957,34 @@ if (superadminDashboard && requireRole('superadmin')) {
     const panelTitle = document.querySelector('#superadminPanelTitle');
     const panelContent = document.querySelector('#superadminPanelContent');
     const sidebarLinks = document.querySelectorAll('[data-superadmin-view]');
+
+    const adminState = {
+        currentView: 'global',
+        notifications: [],
+        data: {
+            summary: {
+                buyers_active: 0,
+                commerces_active: 0,
+                associations_active: 0,
+                reservations_total: 0
+            },
+            buyers: [],
+            commerces: [],
+            associations: [],
+            reservations_by_status: [],
+            account_mix: [],
+            reports: [],
+            system: {
+                database: 'Oracle FOODLOOP',
+                accounts_loaded: 0,
+                suspended_accounts: 0,
+                queued_notifications: 0,
+                scheduled_pickups: 0,
+                reports_total: 0,
+                moderation_table: ''
+            }
+        }
+    };
 
     function openPanel(title, markup) {
         panelTitle.textContent = title;
@@ -2261,14 +3003,11 @@ if (superadminDashboard && requireRole('superadmin')) {
     }
 
     function normalizeStatusClass(status) {
-        const value = status.toLowerCase();
+        const value = String(status || '').toLowerCase();
         if (value.includes('suspend')) {
             return ' is-suspended';
         }
-        if (value.includes('pending')) {
-            return ' is-pending';
-        }
-        if (value.includes('valide') || value.includes('resolu')) {
+        if (value.includes('actif') || value.includes('valide')) {
             return ' is-validated';
         }
         return '';
@@ -2283,32 +3022,32 @@ if (superadminDashboard && requireRole('superadmin')) {
             global: {
                 kicker: 'Pilotage global',
                 title: 'Dashboard global',
-                description: 'Consultez les statistiques globales, les volumes de reservations et l usage systeme.'
+                description: 'Consultez les comptes et reservations reelles issus de la base Oracle.'
             },
             buyers: {
                 kicker: 'Gestion roles',
                 title: 'Gestion acheteurs',
-                description: 'Supprimez ou suspendez des comptes acheteurs selon les besoins de moderation.'
+                description: 'Liste Oracle des acheteurs avec suspension et suppression reelles.'
             },
             commerces: {
                 kicker: 'Gestion roles',
                 title: 'Gestion commerces',
-                description: 'Gardez le controle sur les commerces actifs, suspendus ou a supprimer.'
+                description: 'Liste Oracle des proprietaires commerce avec moderation reelle.'
             },
             associations: {
                 kicker: 'Gestion roles',
                 title: 'Gestion associations',
-                description: 'Validez, suspendez ou supprimez les comptes associatifs selon leur statut.'
+                description: 'Liste Oracle des admins association avec moderation reelle.'
             },
             reports: {
                 kicker: 'Moderation',
                 title: 'Signalements',
-                description: 'Traitez les signalements sur les annonces, acheteurs, commerces et associations.'
+                description: 'Rapports Oracle, consultations et volumes consolides en temps reel.'
             },
             system: {
                 kicker: 'Infrastructure',
                 title: 'Systeme',
-                description: 'Surveillez les logs, l activite admin et les indicateurs temps reel.'
+                description: 'Vue systeme reliee a la session superadmin et aux actions Oracle.'
             }
         };
 
@@ -2323,152 +3062,82 @@ if (superadminDashboard && requireRole('superadmin')) {
         });
     }
 
-    function deleteBuyer(id) {
-        const index = buyers.findIndex((item) => item.id === id);
-        if (index === -1) {
-            return;
-        }
+    async function loadSuperadminData() {
+        const payload = await getFromPhpEndpoint(apiEndpoints.superadmin);
+        adminState.data = {
+            summary: payload.summary || adminState.data.summary,
+            buyers: Array.isArray(payload.buyers) ? payload.buyers : [],
+            commerces: Array.isArray(payload.commerces) ? payload.commerces : [],
+            associations: Array.isArray(payload.associations) ? payload.associations : [],
+            reservations_by_status: Array.isArray(payload.reservations_by_status) ? payload.reservations_by_status : [],
+            account_mix: Array.isArray(payload.account_mix) ? payload.account_mix : [],
+            reports: Array.isArray(payload.reports) ? payload.reports : [],
+            system: payload.system && typeof payload.system === 'object' ? payload.system : adminState.data.system
+        };
+    }
 
-        const [buyer] = buyers.splice(index, 1);
+    async function runSuperadminAction(action, accountType, userId, label) {
+        const formData = new FormData();
+        formData.append('action', action);
+        formData.append('account_type', accountType);
+        formData.append('user_id', String(userId));
+
+        const payload = await postToPhpEndpoint(apiEndpoints.superadmin, formData);
+        adminState.data = {
+            summary: payload.summary || adminState.data.summary,
+            buyers: Array.isArray(payload.buyers) ? payload.buyers : adminState.data.buyers,
+            commerces: Array.isArray(payload.commerces) ? payload.commerces : adminState.data.commerces,
+            associations: Array.isArray(payload.associations) ? payload.associations : adminState.data.associations,
+            reservations_by_status: Array.isArray(payload.reservations_by_status) ? payload.reservations_by_status : adminState.data.reservations_by_status,
+            account_mix: Array.isArray(payload.account_mix) ? payload.account_mix : adminState.data.account_mix,
+            reports: Array.isArray(payload.reports) ? payload.reports : adminState.data.reports,
+            system: payload.system && typeof payload.system === 'object' ? payload.system : adminState.data.system
+        };
         adminState.notifications.unshift({
             id: Date.now(),
-            title: 'Acheteur supprime',
-            message: `${buyer.name} a ete supprime du systeme.`
+            title: 'Action superadmin',
+            message: `${label} applique avec succes sur Oracle.`
         });
         updateNotifications();
-    }
-
-    function deleteCommerce(id) {
-        const index = commerces.findIndex((item) => item.id === id);
-        if (index === -1) {
-            return;
-        }
-
-        const [commerce] = commerces.splice(index, 1);
-        adminState.notifications.unshift({
-            id: Date.now() + 1,
-            title: 'Commerce supprime',
-            message: `${commerce.name} a ete supprime du systeme.`
-        });
-        updateNotifications();
-    }
-
-    function deleteAssociation(id) {
-        const index = associations.findIndex((item) => item.id === id);
-        if (index === -1) {
-            return;
-        }
-
-        const [association] = associations.splice(index, 1);
-        adminState.notifications.unshift({
-            id: Date.now() + 2,
-            title: 'Association supprimee',
-            message: `${association.name} a ete supprimee du systeme.`
-        });
-        updateNotifications();
-    }
-
-    function deleteAnnouncement(id) {
-        const index = reports.findIndex((item) => item.id === id && item.type === 'annonce');
-        if (index === -1) {
-            return;
-        }
-
-        const report = reports[index];
-        report.status = 'Resolu';
-        adminState.notifications.unshift({
-            id: Date.now() + 3,
-            title: 'Annonce supprimee',
-            message: `L annonce ${report.subject} a ete supprimee apres signalement.`
-        });
-        updateNotifications();
-    }
-
-    function suspendAccount(collection, id) {
-        const item = collection.find((entry) => entry.id === id);
-        if (!item) {
-            return;
-        }
-
-        item.status = 'Suspendu';
-        adminState.notifications.unshift({
-            id: Date.now() + 4,
-            title: 'Compte suspendu',
-            message: `${item.name || item.subject} a ete suspendu par le superadmin.`
-        });
-        updateNotifications();
-    }
-
-    function validateAssociation(id) {
-        const association = associations.find((item) => item.id === id);
-        if (!association) {
-            return;
-        }
-
-        association.status = 'Valide';
-        adminState.notifications.unshift({
-            id: Date.now() + 5,
-            title: 'Association validee',
-            message: `${association.name} est maintenant validee sur la plateforme.`
-        });
-        updateNotifications();
-    }
-
-    function resolveReport(id) {
-        const report = reports.find((item) => item.id === id);
-        if (!report) {
-            return;
-        }
-
-        report.status = 'Resolu';
-        adminState.notifications.unshift({
-            id: Date.now() + 6,
-            title: 'Signalement resolu',
-            message: `Le signalement ${report.subject} a ete marque comme resolu.`
-        });
-        updateNotifications();
+        renderCurrentView();
     }
 
     function renderGlobalView() {
+        const summary = adminState.data.summary;
         contentRoot.innerHTML = `
             <div class="superadmin-stats-grid">
                 <article class="superadmin-stat-card">
                     <p class="dashboard-kicker">Acheteurs actifs</p>
-                    <strong>${buyers.filter((item) => item.status === 'Actif').length}</strong>
-                    <p>Comptes clients actuellement operationnels.</p>
+                    <strong>${summary.buyers_active}</strong>
+                    <p>Comptes acheteurs actifs dans Oracle.</p>
                 </article>
                 <article class="superadmin-stat-card">
                     <p class="dashboard-kicker">Commerces actifs</p>
-                    <strong>${commerces.filter((item) => item.status === 'Actif').length}</strong>
-                    <p>Commerces publies et visibles sur la plateforme.</p>
+                    <strong>${summary.commerces_active}</strong>
+                    <p>Comptes commerce actifs dans Oracle.</p>
                 </article>
                 <article class="superadmin-stat-card">
                     <p class="dashboard-kicker">Associations actives</p>
-                    <strong>${associations.filter((item) => item.status === 'Valide').length}</strong>
-                    <p>Associations validees pouvant reserver des lots.</p>
+                    <strong>${summary.associations_active}</strong>
+                    <p>Admins association actifs dans Oracle.</p>
                 </article>
                 <article class="superadmin-stat-card">
                     <p class="dashboard-kicker">Reservations total</p>
-                    <strong>${adminState.reservationsTotal}</strong>
-                    <p>Volume total de reservations traitees sur la periode.</p>
+                    <strong>${summary.reservations_total}</strong>
+                    <p>Volume total de reservations en base Oracle.</p>
                 </article>
             </div>
             <div class="admin-chart-grid">
                 <article class="merchant-chart-card">
-                    <h3>Activity trends</h3>
-                    <div id="superadminActivityChart" class="chart-surface"></div>
-                </article>
-                <article class="merchant-chart-card">
-                    <h3>Reservations volume</h3>
-                    <div id="superadminReservationsChart" class="chart-surface"></div>
-                </article>
-                <article class="merchant-chart-card">
-                    <h3>System usage</h3>
+                    <h3>Repartition comptes</h3>
                     <div id="superadminUsageChart" class="chart-surface"></div>
+                </article>
+                <article class="merchant-chart-card">
+                    <h3>Reservations par statut</h3>
+                    <div id="superadminReservationsChart" class="chart-surface"></div>
                 </article>
             </div>
         `;
-
         renderCharts();
     }
 
@@ -2483,6 +3152,17 @@ if (superadminDashboard && requireRole('superadmin')) {
         `;
     }
 
+    function actionButtons(item, accountType) {
+        const suspendAction = item.status === 'Suspendu' ? 'Activer' : 'Suspendre';
+        const suspendAttr = item.status === 'Suspendu' ? 'data-unsuspend-account' : 'data-suspend-account';
+        return `
+            <div class="superadmin-actions">
+                <button class="admin-action-button admin-action-secondary" type="button" ${suspendAttr}="${accountType}:${item.id}">${suspendAction}</button>
+                <button class="admin-action-button admin-action-danger" type="button" data-delete-account="${accountType}:${item.id}">Supprimer</button>
+            </div>
+        `;
+    }
+
     function renderBuyersView() {
         const rows = `
             <div class="superadmin-table-head">
@@ -2490,49 +3170,42 @@ if (superadminDashboard && requireRole('superadmin')) {
                 <span>Email</span>
                 <span>Actions</span>
             </div>
-            ${buyers.map((buyer) => `
+            ${adminState.data.buyers.map((buyer) => `
                 <div class="superadmin-table-row">
                     <div class="superadmin-table-meta">
                         <strong>${buyer.name}</strong>
                         ${statusPill(buyer.status)}
                     </div>
                     <span>${buyer.email}</span>
-                    <div class="superadmin-actions">
-                        <button class="admin-action-button admin-action-secondary" type="button" data-suspend-buyer="${buyer.id}">Suspendre</button>
-                        <button class="admin-action-button admin-action-danger" type="button" data-delete-buyer="${buyer.id}">Supprimer</button>
-                    </div>
+                    ${actionButtons(buyer, 'buyer')}
                 </div>
             `).join('')}
         `;
-
-        contentRoot.innerHTML = `<div class="superadmin-table-grid">${renderRoleTable('Liste des acheteurs', rows)}</div>`;
+        contentRoot.innerHTML = `<div class="superadmin-table-grid">${renderRoleTable('Liste Oracle des acheteurs', rows)}</div>`;
     }
 
     function renderCommercesView() {
         const rows = `
             <div class="superadmin-table-head">
                 <span>Nom</span>
-                <span>Type / Statut</span>
+                <span>Email / Type</span>
                 <span>Actions</span>
             </div>
-            ${commerces.map((commerce) => `
+            ${adminState.data.commerces.map((commerce) => `
                 <div class="superadmin-table-row">
                     <div class="superadmin-table-meta">
                         <strong>${commerce.name}</strong>
-                        <span>${commerce.type}</span>
-                    </div>
-                    <div class="superadmin-table-meta">
                         ${statusPill(commerce.status)}
                     </div>
-                    <div class="superadmin-actions">
-                        <button class="admin-action-button admin-action-secondary" type="button" data-suspend-commerce="${commerce.id}">Suspendre</button>
-                        <button class="admin-action-button admin-action-danger" type="button" data-delete-commerce="${commerce.id}">Supprimer</button>
+                    <div class="superadmin-table-meta">
+                        <span>${commerce.email}</span>
+                        <span>${commerce.type}</span>
                     </div>
+                    ${actionButtons(commerce, 'commerce')}
                 </div>
             `).join('')}
         `;
-
-        contentRoot.innerHTML = `<div class="superadmin-table-grid">${renderRoleTable('Liste des commerces', rows)}</div>`;
+        contentRoot.innerHTML = `<div class="superadmin-table-grid">${renderRoleTable('Liste Oracle des commerces', rows)}</div>`;
     }
 
     function renderAssociationsView() {
@@ -2542,7 +3215,7 @@ if (superadminDashboard && requireRole('superadmin')) {
                 <span>Email / Statut</span>
                 <span>Actions</span>
             </div>
-            ${associations.map((association) => `
+            ${adminState.data.associations.map((association) => `
                 <div class="superadmin-table-row">
                     <div class="superadmin-table-meta">
                         <strong>${association.name}</strong>
@@ -2551,73 +3224,88 @@ if (superadminDashboard && requireRole('superadmin')) {
                         <span>${association.email}</span>
                         ${statusPill(association.status)}
                     </div>
-                    <div class="superadmin-actions">
-                        <button class="admin-action-button admin-action-secondary" type="button" data-suspend-association="${association.id}">Suspendre</button>
-                        <button class="admin-action-button admin-action-danger" type="button" data-delete-association="${association.id}">Supprimer</button>
-                    </div>
+                    ${actionButtons(association, 'association')}
                 </div>
             `).join('')}
         `;
-
-        contentRoot.innerHTML = `<div class="superadmin-table-grid superadmin-table-grid-wide">${renderRoleTable('Liste des associations', rows)}</div>`;
+        contentRoot.innerHTML = `<div class="superadmin-table-grid superadmin-table-grid-wide">${renderRoleTable('Liste Oracle des associations', rows)}</div>`;
     }
 
     function renderReportsView() {
+        if (adminState.data.reports.length === 0) {
+            contentRoot.innerHTML = '<div class="dashboard-empty">Aucun rapport Oracle n est disponible pour le moment.</div>';
+            return;
+        }
+
         const rows = `
             <div class="superadmin-table-head">
-                <span>Type / Objet</span>
-                <span>Raison / Statut</span>
-                <span>Actions</span>
+                <span>Rapport</span>
+                <span>Periode / consultations</span>
+                <span>Impact</span>
             </div>
-            ${reports.map((report) => `
+            ${adminState.data.reports.map((report) => `
                 <div class="superadmin-table-row">
                     <div class="superadmin-table-meta">
                         <strong>${report.type}</strong>
-                        <span>${report.subject}</span>
+                        <span>Genere le ${report.created_at}</span>
                     </div>
                     <div class="superadmin-table-meta">
-                        <span>${report.reason}</span>
-                        ${statusPill(report.status)}
+                        <span>${report.period}</span>
+                        <span>Commerces: ${report.commerce_views} · Superadmin: ${report.superadmin_views}</span>
                     </div>
-                    <div class="superadmin-actions">
-                        ${report.type === 'annonce'
-                            ? `<button class="admin-action-button admin-action-danger" type="button" data-delete-announcement="${report.id}">Supprimer annonce</button>`
-                            : report.type === 'acheteur'
-                                ? `<button class="admin-action-button admin-action-secondary" type="button" data-ban-buyer="${report.id}">Ban acheteur</button>`
-                                : `<button class="admin-action-button admin-action-secondary" type="button" data-resolve-report="${report.id}">Examiner</button>`
-                        }
-                        <button class="admin-action-button admin-action-primary" type="button" data-resolve-report="${report.id}">Resoudre</button>
+                    <div class="superadmin-table-meta">
+                        <span>${report.food_saved_kg.toFixed(2)} kg sauves</span>
+                        <span>${report.total_reservations} reservations · ${report.total_distributions} distributions</span>
                     </div>
                 </div>
             `).join('')}
         `;
 
-        contentRoot.innerHTML = `<div class="superadmin-table-grid superadmin-table-grid-wide">${renderRoleTable('Liste des signalements', rows)}</div>`;
+        contentRoot.innerHTML = `<div class="superadmin-table-grid superadmin-table-grid-wide">${renderRoleTable('Rapports Oracle', rows)}</div>`;
     }
 
     function renderSystemView() {
+        const system = adminState.data.system || {};
         contentRoot.innerHTML = `
             <div class="system-grid">
                 <article class="system-card">
-                    <h3>Controle systeme</h3>
+                    <h3>Etat superadmin</h3>
                     <div class="monitoring-list">
-                        ${adminState.liveMonitoring.map((entry) => `
-                            <div class="monitoring-item">
-                                <strong>${entry.label}</strong>
-                                <p>${entry.value}</p>
-                            </div>
-                        `).join('')}
+                        <div class="monitoring-item">
+                            <strong>Source</strong>
+                            <p>${system.database || 'Oracle FOODLOOP'}</p>
+                        </div>
+                        <div class="monitoring-item">
+                            <strong>Comptes charges</strong>
+                            <p>${system.accounts_loaded ?? 0}</p>
+                        </div>
+                        <div class="monitoring-item">
+                            <strong>Comptes suspendus</strong>
+                            <p>${system.suspended_accounts ?? 0}</p>
+                        </div>
+                        <div class="monitoring-item">
+                            <strong>Pickups en attente</strong>
+                            <p>${system.scheduled_pickups ?? 0}</p>
+                        </div>
+                        <div class="monitoring-item">
+                            <strong>Notifications en file</strong>
+                            <p>${system.queued_notifications ?? 0}</p>
+                        </div>
+                        <div class="monitoring-item">
+                            <strong>Moderation</strong>
+                            <p>${system.moderation_table || 'Non disponible'}</p>
+                        </div>
                     </div>
                 </article>
                 <article class="system-card">
-                    <h3>Logs systeme</h3>
+                    <h3>Logs d actions</h3>
                     <div class="system-log-list">
-                        ${adminState.systemLogs.map((log) => `
+                        ${adminState.notifications.map((log) => `
                             <div class="system-log-item">
                                 <strong>${log.title}</strong>
                                 <p>${log.message}</p>
                             </div>
-                        `).join('')}
+                        `).join('') || '<div class="system-log-item"><strong>Aucun log</strong><p>Aucune action superadmin sur cette session.</p></div>'}
                     </div>
                 </article>
             </div>
@@ -2629,16 +3317,17 @@ if (superadminDashboard && requireRole('superadmin')) {
             return;
         }
 
-        const activityChart = new window.CanvasJS.Chart('superadminActivityChart', {
+        const usageChart = new window.CanvasJS.Chart('superadminUsageChart', {
             animationEnabled: true,
             backgroundColor: 'transparent',
-            axisY: { gridColor: 'rgba(154, 177, 122, 0.18)' },
             data: [{
-                type: 'line',
-                color: '#9AB17A',
-                dataPoints: [34, 41, 38, 47, 52, 49, 58].map((value, index) => ({
-                    label: `J${index + 1}`,
-                    y: value
+                type: 'pie',
+                startAngle: 220,
+                indexLabel: '{label}: {y}',
+                dataPoints: adminState.data.account_mix.map((item, index) => ({
+                    label: item.label,
+                    y: item.value,
+                    color: ['#9AB17A', '#C3CC9B', '#E4DFB5'][index % 3]
                 }))
             }]
         });
@@ -2650,31 +3339,15 @@ if (superadminDashboard && requireRole('superadmin')) {
             data: [{
                 type: 'column',
                 color: '#C3CC9B',
-                dataPoints: [28, 36, 31, 42, 46].map((value, index) => ({
-                    label: `S${index + 1}`,
-                    y: value
+                dataPoints: adminState.data.reservations_by_status.map((item) => ({
+                    label: item.label,
+                    y: item.value
                 }))
             }]
         });
 
-        const usageChart = new window.CanvasJS.Chart('superadminUsageChart', {
-            animationEnabled: true,
-            backgroundColor: 'transparent',
-            data: [{
-                type: 'pie',
-                startAngle: 220,
-                indexLabel: '{label}: {y}',
-                dataPoints: [
-                    { label: 'Acheteurs', y: buyers.length, color: '#9AB17A' },
-                    { label: 'Commerces', y: commerces.length, color: '#C3CC9B' },
-                    { label: 'Associations', y: associations.length, color: '#E4DFB5' }
-                ]
-            }]
-        });
-
-        activityChart.render();
-        reservationsChart.render();
         usageChart.render();
+        reservationsChart.render();
     }
 
     function renderCurrentView() {
@@ -2712,66 +3385,33 @@ if (superadminDashboard && requireRole('superadmin')) {
         });
     });
 
-    contentRoot.addEventListener('click', (event) => {
+    contentRoot.addEventListener('click', async (event) => {
         const target = event.target;
         if (!(target instanceof HTMLElement)) {
             return;
         }
 
-        if (target.matches('[data-delete-buyer]')) {
-            deleteBuyer(Number(target.getAttribute('data-delete-buyer')));
-            renderCurrentView();
-        }
+        const deleteToken = target.getAttribute('data-delete-account');
+        const suspendToken = target.getAttribute('data-suspend-account');
+        const unsuspendToken = target.getAttribute('data-unsuspend-account');
 
-        if (target.matches('[data-suspend-buyer]')) {
-            suspendAccount(buyers, Number(target.getAttribute('data-suspend-buyer')));
-            renderCurrentView();
-        }
-
-        if (target.matches('[data-delete-commerce]')) {
-            deleteCommerce(Number(target.getAttribute('data-delete-commerce')));
-            renderCurrentView();
-        }
-
-        if (target.matches('[data-suspend-commerce]')) {
-            suspendAccount(commerces, Number(target.getAttribute('data-suspend-commerce')));
-            renderCurrentView();
-        }
-
-        if (target.matches('[data-delete-association]')) {
-            deleteAssociation(Number(target.getAttribute('data-delete-association')));
-            renderCurrentView();
-        }
-
-        if (target.matches('[data-suspend-association]')) {
-            suspendAccount(associations, Number(target.getAttribute('data-suspend-association')));
-            renderCurrentView();
-        }
-
-        if (target.matches('[data-validate-association]')) {
-            validateAssociation(Number(target.getAttribute('data-validate-association')));
-            renderCurrentView();
-        }
-
-        if (target.matches('[data-delete-announcement]')) {
-            deleteAnnouncement(Number(target.getAttribute('data-delete-announcement')));
-            renderCurrentView();
-        }
-
-        if (target.matches('[data-ban-buyer]')) {
-            const reportId = Number(target.getAttribute('data-ban-buyer'));
-            const report = reports.find((item) => item.id === reportId);
-            const buyer = buyers.find((item) => item.name === report?.subject);
-            if (buyer) {
-                suspendAccount(buyers, buyer.id);
+        try {
+            if (deleteToken) {
+                const [accountType, rawId] = deleteToken.split(':');
+                await runSuperadminAction('delete', accountType, Number(rawId), 'Suppression');
             }
-            resolveReport(reportId);
-            renderCurrentView();
-        }
 
-        if (target.matches('[data-resolve-report]')) {
-            resolveReport(Number(target.getAttribute('data-resolve-report')));
-            renderCurrentView();
+            if (suspendToken) {
+                const [accountType, rawId] = suspendToken.split(':');
+                await runSuperadminAction('suspend', accountType, Number(rawId), 'Suspension');
+            }
+
+            if (unsuspendToken) {
+                const [accountType, rawId] = unsuspendToken.split(':');
+                await runSuperadminAction('unsuspend', accountType, Number(rawId), 'Reactivation');
+            }
+        } catch (error) {
+            openPanel('Erreur superadmin', `<p class="inline-error">${error instanceof Error ? error.message : 'Action impossible.'}</p>`);
         }
     });
 
@@ -2783,7 +3423,7 @@ if (superadminDashboard && requireRole('superadmin')) {
                     <strong>${notification.title}</strong>
                     <p>${notification.message}</p>
                 </article>
-            `).join('')
+            `).join('') || '<div class="dashboard-empty">Aucune notification pour le moment.</div>'
         );
     });
 
@@ -2792,16 +3432,16 @@ if (superadminDashboard && requireRole('superadmin')) {
             'Profil superadmin',
             `
                 <article class="panel-item">
-                    <strong>Superadmin principal</strong>
-                    <p>Acces complet a la moderation, au monitoring et a la gestion multi-roles.</p>
+                    <strong>Superadmin FoodLoop</strong>
+                    <p>Session PHP superadmin avec gestion Oracle des comptes.</p>
                 </article>
             `
         );
     });
 
     logoutButton.addEventListener('click', () => {
-        window.localStorage.clear();
-        window.location.href = 'homepage.html';
+        clearApplicationState();
+        window.location.href = pageRoutes.logout;
     });
 
     panel.addEventListener('click', (event) => {
@@ -2811,13 +3451,20 @@ if (superadminDashboard && requireRole('superadmin')) {
         }
     });
 
-    updateNotifications();
-    renderCurrentView();
+    contentRoot.innerHTML = '<div class="dashboard-empty">Chargement des donnees Oracle...</div>';
+    loadSuperadminData()
+        .then(() => {
+            updateNotifications();
+            renderCurrentView();
+        })
+        .catch((error) => {
+            contentRoot.innerHTML = `<div class="dashboard-empty">${error instanceof Error ? error.message : 'Chargement impossible.'}</div>`;
+        });
 }
 
 if (paymentApp && requireAuthenticatedUser()) {
     const currentUser = requireAuthenticatedUser();
-    const fallbackBuyerDashboard = currentUser ? getRouteForRole(currentUser.role) : 'login_signup.html';
+    const fallbackBuyerDashboard = currentUser ? getRouteForRole(currentUser.role) : pageRoutes.login;
     const paymentTitle = document.querySelector('#paymentTitle');
     const paymentSubtitle = document.querySelector('#paymentSubtitle');
     const paymentContent = document.querySelector('#paymentContent');
@@ -2837,18 +3484,25 @@ if (paymentApp && requireAuthenticatedUser()) {
         return sum + (parsePaymentPrice(item.price) * quantity);
     }, 0);
 
-    function parsePaymentPrice(value) {
-        return Number.parseFloat(String(value).replace(' DT', '').replace(',', '.')) || 0;
-    }
-
     function loadPaymentCart() {
         try {
-            const raw = window.localStorage.getItem(checkoutStorageKey);
+            const raw = window.localStorage.getItem(checkoutStorageKey) || window.localStorage.getItem(legacyCheckoutStorageKey);
             if (!raw) {
                 return [];
             }
             const parsed = JSON.parse(raw);
-            return Array.isArray(parsed) ? parsed : [];
+            if (!Array.isArray(parsed)) {
+                return [];
+            }
+
+            const normalizedItems = parsed
+                .filter((item) => recordBelongsToUser(item, currentUser))
+                .map((item) => normalizeCheckoutItem(item, currentUser))
+                .filter(Boolean);
+
+            persistStoredArray(checkoutStorageKey, normalizedItems);
+            window.localStorage.removeItem(legacyCheckoutStorageKey);
+            return normalizedItems;
         } catch (error) {
             return [];
         }
@@ -2992,17 +3646,22 @@ if (paymentApp && requireAuthenticatedUser()) {
         }
 
         if (method === 'pickup') {
-            paymentState.method = 'pickup';
-            paymentState.pickupCode = generatePickupCode();
-            paymentState.step = 'pickup';
-            window.localStorage.removeItem(checkoutStorageKey);
-            window.localStorage.removeItem(checkoutReturnKey);
-            if (returnPage === 'admin_association_dashboard.html') {
-                window.localStorage.removeItem(adminCartStorageKey);
-            } else {
-                window.localStorage.removeItem(buyerCartStorageKey);
-            }
-            renderPaymentStep();
+            (async () => {
+                try {
+                    const paymentResults = await processPaymentsForCart(paymentState.cart, 'onsite', {
+                        receiver_name: currentUser && currentUser.email ? currentUser.email : 'Client FoodLoop'
+                    });
+                    paymentState.method = 'pickup';
+                    paymentState.pickupCode = paymentResults.map((item) => item.pickup_code).filter(Boolean).join(' / ');
+                    paymentState.step = 'pickup';
+                    finalizeSuccessfulCheckout(currentUser, paymentState.cart, returnPage);
+                    window.localStorage.removeItem(checkoutStorageKey);
+                    window.localStorage.removeItem(checkoutReturnKey);
+                    renderPaymentStep();
+                } catch (error) {
+                    paymentContent.innerHTML = `<div class="payment-panel"><p class="inline-error">${error instanceof Error ? error.message : 'Paiement impossible.'}</p></div>`;
+                }
+            })();
             return;
         }
 
@@ -3024,17 +3683,27 @@ if (paymentApp && requireAuthenticatedUser()) {
         }
 
         if (form.getAttribute('data-payment-action') === 'submit-card') {
-            paymentState.method = 'card';
-            paymentState.transactionId = generateTransactionId();
-            paymentState.step = 'receipt';
-            window.localStorage.removeItem(checkoutStorageKey);
-            window.localStorage.removeItem(checkoutReturnKey);
-            if (returnPage === 'admin_association_dashboard.html') {
-                window.localStorage.removeItem(adminCartStorageKey);
-            } else {
-                window.localStorage.removeItem(buyerCartStorageKey);
-            }
-            renderPaymentStep();
+            (async () => {
+                const cardFormData = new FormData(form);
+
+                try {
+                    const paymentResults = await processPaymentsForCart(paymentState.cart, 'card', {
+                        card_holder: String(cardFormData.get('owner') || ''),
+                        card_number: String(cardFormData.get('cardNumber') || ''),
+                        card_expiry: String(cardFormData.get('cardExpiry') || '12/30'),
+                        card_cvc: String(cardFormData.get('cvv') || '')
+                    });
+                    paymentState.method = 'card';
+                    paymentState.transactionId = paymentResults.map((item) => `PAY-${item.payment_id}`).join(' / ') || generateTransactionId();
+                    paymentState.step = 'receipt';
+                    finalizeSuccessfulCheckout(currentUser, paymentState.cart, returnPage);
+                    window.localStorage.removeItem(checkoutStorageKey);
+                    window.localStorage.removeItem(checkoutReturnKey);
+                    renderPaymentStep();
+                } catch (error) {
+                    paymentContent.insertAdjacentHTML('beforeend', `<p class="inline-error">${error instanceof Error ? error.message : 'Paiement impossible.'}</p>`);
+                }
+            })();
         }
     });
 

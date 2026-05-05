@@ -1,31 +1,36 @@
 <?php
-
 declare(strict_types=1);
 
-$sessionPath = __DIR__ . '/../storage/sessions';
+define('BASE_PATH', dirname(__DIR__));
 
-if (!is_dir($sessionPath)) {
-    mkdir($sessionPath, 0777, true);
+$config = require __DIR__ . '/app.php';
+
+function app_config(string $key, mixed $default = null): mixed
+{
+    global $config;
+
+    $value = $config;
+    foreach (explode('.', $key) as $segment) {
+        if (!is_array($value) || !array_key_exists($segment, $value)) {
+            return $default;
+        }
+
+        $value = $value[$segment];
+    }
+
+    return $value;
 }
 
-session_save_path($sessionPath);
-session_start();
-
-require_once __DIR__ . '/helpers.php';
-
-spl_autoload_register(
-    static function (string $class): void {
-        $prefix = 'App\\';
-
-        if (strncmp($class, $prefix, strlen($prefix)) !== 0) {
-            return;
-        }
-
-        $relativeClass = substr($class, strlen($prefix));
-        $file = __DIR__ . '/../app/' . str_replace('\\', '/', $relativeClass) . '.php';
-
-        if (is_file($file)) {
-            require_once $file;
-        }
+spl_autoload_register(static function (string $class): void {
+    $prefix = 'App\\';
+    if (!str_starts_with($class, $prefix)) {
+        return;
     }
-);
+
+    $relativePath = str_replace('\\', DIRECTORY_SEPARATOR, substr($class, strlen($prefix)));
+    $file = BASE_PATH . DIRECTORY_SEPARATOR . 'app' . DIRECTORY_SEPARATOR . $relativePath . '.php';
+
+    if (is_file($file)) {
+        require_once $file;
+    }
+});

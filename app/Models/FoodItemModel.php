@@ -1,215 +1,266 @@
 <?php
-
 declare(strict_types=1);
 
 namespace App\Models;
 
-use PDO;
-
 final class FoodItemModel extends BaseModel
 {
-    public function categories(): array
+    public function listFeedAnnouncements(string $frontendRole): array
     {
-        $stmt = $this->requireDb()->query('SELECT ID_CAT AS id, NOM AS name FROM CATEGORIES ORDER BY NOM ASC');
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $statuses = $frontendRole === 'admin_association'
+            ? ['available', 'priority_access']
+            : ['available'];
+
+        $placeholders = [];
+        foreach ($statuses as $index => $status) {
+            $placeholders[] = ':status_' . $index;
+        }
+
+        $stmt = $this->pdo->prepare('
+            SELECT
+                a.ID_ANNONCE,
+                a.TITRE,
+                a.DESCRIPTION,
+                a.TYPE_ALIMENT,
+                a.PRIX,
+                a.QUANTITE,
+                a.UNITE,
+                a.LOCALISATION,
+                a.STATUT,
+                TO_CHAR(a.PICKUP_START, \'HH24:MI\') AS PICKUP_START_TIME,
+                TO_CHAR(a.PICKUP_END, \'HH24:MI\') AS PICKUP_END_TIME,
+                NVL(c.NOM, a.TYPE_ALIMENT) AS CATEGORY_NAME,
+                NVL(z.NOM, a.LOCALISATION) AS ZONE_NAME,
+                NVL(z.GOUVERNORAT, a.LOCALISATION) AS ZONE_CITY
+            FROM ANNONCES a
+            LEFT JOIN CATEGORIES c ON c.ID_CAT = a.CATEGORIE_ID
+            LEFT JOIN ZONES_GEOGRAPHIQUES z ON z.ID_ZONE = a.ZONE_ID
+            WHERE a.STATUT IN (' . implode(', ', $placeholders) . ')
+              AND a.QUANTITE > 0
+            ORDER BY a.CREATED_AT DESC, a.ID_ANNONCE DESC
+        ');
+
+        foreach ($statuses as $index => $status) {
+            $stmt->bindValue(':status_' . $index, $status);
+        }
+
+        $stmt->execute();
+
+        return $stmt->fetchAll();
     }
 
-    public function latestAvailable(int $limit = 6): array
+    public function listOwnerAnnouncements(int $ownerId): array
     {
-        $limit = max(1, $limit);
-        $stmt = $this->requireDb()->query(
-            'SELECT
-                a.ID_ANNONCE AS id,
-                a.PROPRIETAIRE_ID AS organization_id,
-                a.CATEGORIE_ID AS category_id,
-                a.TITRE AS title,
-                a.DESCRIPTION AS description,
-                a.TYPE_ALIMENT AS food_type,
-                a.QUANTITE AS quantity,
-                a.UNITE AS unit,
-                a.LOCALISATION AS location,
-                a.STATUT AS status,
-                a.PUBLIC_VISIBILITY_AT AS priority_until,
-                a.PICKUP_START AS pickup_start,
-                a.PICKUP_END AS pickup_end,
-                a.DATE_EXPIRATION AS expiration_date,
-                a.ZONE_ID AS pickup_address_id,
-                a.CREATED_AT AS created_at,
-                a.UPDATED_AT AS updated_at,
-                p.NOM_COMMERCE AS organization_name,
-                c.NOM AS category_name,
-                z.VILLE_NOM AS city,
-                z.GOUVERNORAT AS governorate
-             FROM ANNONCES a
-             INNER JOIN PROPRIETAIRES_COMMERCE p ON p.ID_COMMERCE = a.PROPRIETAIRE_ID
-             INNER JOIN CATEGORIES c ON c.ID_CAT = a.CATEGORIE_ID
-             LEFT JOIN ZONES_GEOGRAPHIQUES z ON z.ID_ZONE = a.ZONE_ID
-             WHERE a.STATUT IN (''available'', ''priority_access'')
-             ORDER BY a.CREATED_AT DESC
-             FETCH FIRST ' . $limit . ' ROWS ONLY'
-        );
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $stmt = $this->pdo->prepare('
+            SELECT
+                a.ID_ANNONCE,
+                a.TITRE,
+                a.DESCRIPTION,
+                a.TYPE_ALIMENT,
+                a.PRIX,
+                a.QUANTITE,
+                a.UNITE,
+                a.LOCALISATION,
+                a.STATUT,
+                TO_CHAR(a.PICKUP_START, \'HH24:MI\') AS PICKUP_START_TIME,
+                TO_CHAR(a.PICKUP_END, \'HH24:MI\') AS PICKUP_END_TIME,
+                NVL(c.NOM, a.TYPE_ALIMENT) AS CATEGORY_NAME,
+                NVL(z.NOM, a.LOCALISATION) AS ZONE_NAME
+            FROM ANNONCES a
+            LEFT JOIN CATEGORIES c ON c.ID_CAT = a.CATEGORIE_ID
+            LEFT JOIN ZONES_GEOGRAPHIQUES z ON z.ID_ZONE = a.ZONE_ID
+            WHERE a.PROPRIETAIRE_ID = :owner_id
+            ORDER BY a.CREATED_AT DESC, a.ID_ANNONCE DESC
+        ');
+        $stmt->bindValue(':owner_id', $ownerId, \PDO::PARAM_INT);
+        $stmt->execute();
+
+        return $stmt->fetchAll();
     }
 
-    public function allForAdmin(): array
+    public function findAnnonceSnapshots(array $annonceIds): array
     {
-        $stmt = $this->requireDb()->query(
-            'SELECT
-                a.ID_ANNONCE AS id,
-                a.PROPRIETAIRE_ID AS organization_id,
-                a.CATEGORIE_ID AS category_id,
-                a.TITRE AS title,
-                a.DESCRIPTION AS description,
-                a.TYPE_ALIMENT AS food_type,
-                a.QUANTITE AS quantity,
-                a.UNITE AS unit,
-                a.LOCALISATION AS location,
-                a.STATUT AS status,
-                a.PUBLIC_VISIBILITY_AT AS priority_until,
-                a.PICKUP_START AS pickup_start,
-                a.PICKUP_END AS pickup_end,
-                a.DATE_EXPIRATION AS expiration_date,
-                a.ZONE_ID AS pickup_address_id,
-                a.CREATED_AT AS created_at,
-                a.UPDATED_AT AS updated_at,
-                p.NOM_COMMERCE AS organization_name,
-                c.NOM AS category_name
-             FROM ANNONCES a
-             INNER JOIN PROPRIETAIRES_COMMERCE p ON p.ID_COMMERCE = a.PROPRIETAIRE_ID
-             INNER JOIN CATEGORIES c ON c.ID_CAT = a.CATEGORIE_ID
-             ORDER BY a.CREATED_AT DESC'
-        );
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $normalizedIds = array_values(array_unique(array_filter(array_map(static fn ($id) => (int) $id, $annonceIds), static fn (int $id) => $id > 0)));
+        if ($normalizedIds === []) {
+            return [];
+        }
+
+        $placeholders = [];
+        $params = [];
+        foreach ($normalizedIds as $index => $id) {
+            $placeholder = ':id_' . $index;
+            $placeholders[] = $placeholder;
+            $params[$placeholder] = $id;
+        }
+
+        $stmt = $this->pdo->prepare('
+            SELECT
+                ID_ANNONCE,
+                TITRE,
+                DESCRIPTION,
+                LOCALISATION,
+                PRIX,
+                QUANTITE,
+                STATUT
+            FROM ANNONCES
+            WHERE ID_ANNONCE IN (' . implode(', ', $placeholders) . ')
+        ');
+
+        foreach ($params as $placeholder => $value) {
+            $stmt->bindValue($placeholder, $value, \PDO::PARAM_INT);
+        }
+
+        $stmt->execute();
+
+        return $stmt->fetchAll();
     }
 
-    public function allForOrganization(int $organizationId): array
+    public function commerceExists(int $commerceId): bool
     {
-        $stmt = $this->requireDb()->prepare(
-            'SELECT
-                a.ID_ANNONCE AS id,
-                a.PROPRIETAIRE_ID AS organization_id,
-                a.CATEGORIE_ID AS category_id,
-                a.TITRE AS title,
-                a.DESCRIPTION AS description,
-                a.TYPE_ALIMENT AS food_type,
-                a.QUANTITE AS quantity,
-                a.UNITE AS unit,
-                a.LOCALISATION AS location,
-                a.STATUT AS status,
-                a.PUBLIC_VISIBILITY_AT AS priority_until,
-                a.PICKUP_START AS pickup_start,
-                a.PICKUP_END AS pickup_end,
-                a.DATE_EXPIRATION AS expiration_date,
-                a.ZONE_ID AS pickup_address_id,
-                a.CREATED_AT AS created_at,
-                a.UPDATED_AT AS updated_at,
-                c.NOM AS category_name
-             FROM ANNONCES a
-             INNER JOIN CATEGORIES c ON c.ID_CAT = a.CATEGORIE_ID
-             WHERE a.PROPRIETAIRE_ID = :organization_id
-             ORDER BY a.CREATED_AT DESC'
-        );
-        $stmt->execute(['organization_id' => $organizationId]);
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $stmt = $this->pdo->prepare('SELECT COUNT(*) AS TOTAL FROM PROPRIETAIRES_COMMERCE WHERE ID_COMMERCE = :id');
+        $stmt->bindValue(':id', $commerceId);
+        $stmt->execute();
+        $row = $stmt->fetch();
+
+        return (int) ($row['TOTAL'] ?? 0) > 0;
     }
 
-    public function find(int $id): ?array
+    public function resolveZoneId(int $zoneId): int
     {
-        $stmt = $this->requireDb()->prepare(
-            'SELECT
-                a.ID_ANNONCE AS id,
-                a.PROPRIETAIRE_ID AS organization_id,
-                a.CATEGORIE_ID AS category_id,
-                a.TITRE AS title,
-                a.DESCRIPTION AS description,
-                a.TYPE_ALIMENT AS food_type,
-                a.QUANTITE AS quantity,
-                a.UNITE AS unit,
-                a.LOCALISATION AS location,
-                a.STATUT AS status,
-                a.PUBLIC_VISIBILITY_AT AS priority_until,
-                a.PICKUP_START AS pickup_start,
-                a.PICKUP_END AS pickup_end,
-                a.DATE_EXPIRATION AS expiration_date,
-                a.ZONE_ID AS pickup_address_id,
-                a.CREATED_AT AS created_at,
-                a.UPDATED_AT AS updated_at
-             FROM ANNONCES a
-             WHERE a.ID_ANNONCE = :id
-             FETCH FIRST 1 ROWS ONLY'
-        );
-        $stmt->execute(['id' => $id]);
-        $item = $stmt->fetch(PDO::FETCH_ASSOC);
-        return $item ?: null;
+        if ($zoneId > 0) {
+            return $zoneId;
+        }
+
+        $stmt = $this->pdo->prepare('SELECT MIN(ID_ZONE) AS ID_ZONE FROM ZONES_GEOGRAPHIQUES');
+        $stmt->execute();
+        $row = $stmt->fetch();
+
+        return (int) ($row['ID_ZONE'] ?? 0);
+    }
+
+    public function resolveZoneIdFromLocation(string $location, int $zoneId = 0): int
+    {
+        if ($zoneId > 0) {
+            return $zoneId;
+        }
+
+        $normalizedLocation = trim($location);
+        if ($normalizedLocation !== '') {
+            $stmt = $this->pdo->prepare('
+                SELECT ID_ZONE
+                FROM ZONES_GEOGRAPHIQUES
+                WHERE UPPER(NOM) = UPPER(:location)
+                   OR UPPER(VILLE_NOM) = UPPER(:location)
+                   OR UPPER(GOUVERNORAT) = UPPER(:location)
+                ORDER BY ID_ZONE
+            ');
+            $stmt->bindValue(':location', $normalizedLocation);
+            $stmt->execute();
+            $row = $stmt->fetch();
+
+            if ($row !== false) {
+                return (int) ($row['ID_ZONE'] ?? 0);
+            }
+        }
+
+        return $this->resolveZoneId(0);
+    }
+
+    public function resolveCategoryIdFromType(string $type, int $categoryId = 0): int
+    {
+        if ($categoryId > 0) {
+            return $categoryId;
+        }
+
+        $normalizedType = mb_strtolower(trim($type));
+        $candidateNames = match (true) {
+            str_contains($normalizedType, 'boulanger') => ['Boulangerie'],
+            str_contains($normalizedType, 'plat'), str_contains($normalizedType, 'restauration'), str_contains($normalizedType, 'repas') => ['Plats cuisines'],
+            str_contains($normalizedType, 'lait'), str_contains($normalizedType, 'yaourt'), str_contains($normalizedType, 'fromage') => ['Produits laitiers'],
+            default => ['Epicerie fraiche'],
+        };
+
+        $stmt = $this->pdo->prepare('SELECT ID_CAT FROM CATEGORIES WHERE NOM = :nom');
+        foreach ($candidateNames as $name) {
+            $stmt->bindValue(':nom', $name);
+            $stmt->execute();
+            $row = $stmt->fetch();
+            if ($row !== false) {
+                return (int) ($row['ID_CAT'] ?? 0);
+            }
+        }
+
+        $stmtFallback = $this->pdo->prepare('SELECT MIN(ID_CAT) AS ID_CAT FROM CATEGORIES');
+        $stmtFallback->execute();
+        $row = $stmtFallback->fetch();
+
+        return (int) ($row['ID_CAT'] ?? 0);
     }
 
     public function create(array $data): int
     {
-        $db = $this->requireDb();
-        $id = $this->nextId('ANNONCES', 'ID_ANNONCE');
-        $stmt = $db->prepare(
-            'INSERT INTO ANNONCES (
-                ID_ANNONCE, TITRE, DESCRIPTION, TYPE_ALIMENT, QUANTITE, UNITE, LOCALISATION, STATUT,
-                PUBLIC_VISIBILITY_AT, PICKUP_START, PICKUP_END, DATE_EXPIRATION, CATEGORIE_ID, ZONE_ID,
-                PROPRIETAIRE_ID, CREATED_AT, UPDATED_AT
-             ) VALUES (
-                :id, :title, :description, :food_type, :quantity, :unit, :location, :status,
-                :priority_until, :pickup_start, :pickup_end, :expiration_date, :category_id, :pickup_address_id,
-                :organization_id, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
-             )'
-        );
+        $annonceId = $this->nextId('ANNONCES', 'ID_ANNONCE');
+
+        $stmt = $this->pdo->prepare('
+            INSERT INTO ANNONCES (
+                ID_ANNONCE,
+                TITRE,
+                DESCRIPTION,
+                TYPE_ALIMENT,
+                PRIX,
+                QUANTITE,
+                UNITE,
+                LOCALISATION,
+                STATUT,
+                PUBLIC_VISIBILITY_AT,
+                PICKUP_START,
+                PICKUP_END,
+                DATE_EXPIRATION,
+                CATEGORIE_ID,
+                ZONE_ID,
+                PROPRIETAIRE_ID,
+                CREATED_AT,
+                UPDATED_AT
+            ) VALUES (
+                :id_annonce,
+                :titre,
+                :description,
+                :type_aliment,
+                :prix,
+                :quantite,
+                :unite,
+                :localisation,
+                :statut,
+                TO_TIMESTAMP(:public_visibility_at, \'YYYY-MM-DD HH24:MI:SS\'),
+                TO_TIMESTAMP(:pickup_start, \'YYYY-MM-DD HH24:MI:SS\'),
+                TO_TIMESTAMP(:pickup_end, \'YYYY-MM-DD HH24:MI:SS\'),
+                TO_TIMESTAMP(:date_expiration, \'YYYY-MM-DD HH24:MI:SS\'),
+                :categorie_id,
+                :zone_id,
+                :proprietaire_id,
+                CURRENT_TIMESTAMP,
+                CURRENT_TIMESTAMP
+            )
+        ');
         $stmt->execute([
-            'id' => $id,
-            'organization_id' => $data['organization_id'],
-            'category_id' => $data['category_id'],
-            'title' => $data['title'],
-            'description' => $data['description'] ?: null,
-            'food_type' => $data['food_type'] ?? $data['title'],
-            'quantity' => $data['quantity'],
-            'unit' => $data['unit'],
-            'location' => $data['location'] ?? null,
-            'expiration_date' => $data['expiration_date'],
+            'id_annonce' => $annonceId,
+            'titre' => $data['title'],
+            'description' => $data['description'],
+            'type_aliment' => $data['type'],
+            'prix' => $data['price'],
+            'quantite' => $data['quantity'],
+            'unite' => $data['unit'],
+            'localisation' => $data['location'],
+            'statut' => $data['status'],
+            'public_visibility_at' => $data['public_visibility_at'],
             'pickup_start' => $data['pickup_start'],
             'pickup_end' => $data['pickup_end'],
-            'pickup_address_id' => $data['pickup_address_id'],
-            'status' => $data['status'],
-            'priority_until' => ($data['priority_until'] ?? '') !== '' ? $data['priority_until'] : $data['pickup_start'],
+            'date_expiration' => $data['expiration_date'],
+            'categorie_id' => $data['category_id'],
+            'zone_id' => $data['zone_id'],
+            'proprietaire_id' => $data['owner_id'],
         ]);
 
-        return $id;
-    }
-
-    public function update(int $id, array $data): void
-    {
-        $stmt = $this->requireDb()->prepare(
-            'UPDATE ANNONCES
-             SET CATEGORIE_ID = :category_id, TITRE = :title, DESCRIPTION = :description, TYPE_ALIMENT = :food_type,
-                 QUANTITE = :quantity, UNITE = :unit, LOCALISATION = :location, DATE_EXPIRATION = :expiration_date,
-                 PICKUP_START = :pickup_start, PICKUP_END = :pickup_end, STATUT = :status,
-                 PUBLIC_VISIBILITY_AT = :priority_until, ZONE_ID = :pickup_address_id, UPDATED_AT = CURRENT_TIMESTAMP
-             WHERE ID_ANNONCE = :id'
-        );
-        $stmt->execute([
-            'id' => $id,
-            'category_id' => $data['category_id'],
-            'title' => $data['title'],
-            'description' => $data['description'] ?: null,
-            'food_type' => $data['food_type'] ?? $data['title'],
-            'quantity' => $data['quantity'],
-            'unit' => $data['unit'],
-            'location' => $data['location'] ?? null,
-            'expiration_date' => $data['expiration_date'],
-            'pickup_start' => $data['pickup_start'],
-            'pickup_end' => $data['pickup_end'],
-            'status' => $data['status'],
-            'priority_until' => ($data['priority_until'] ?? '') !== '' ? $data['priority_until'] : $data['pickup_start'],
-            'pickup_address_id' => $data['pickup_address_id'],
-        ]);
-    }
-
-    public function delete(int $id): void
-    {
-        $stmt = $this->requireDb()->prepare('DELETE FROM ANNONCES WHERE ID_ANNONCE = :id');
-        $stmt->execute(['id' => $id]);
+        return $annonceId;
     }
 }

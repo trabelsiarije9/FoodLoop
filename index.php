@@ -1,110 +1,48 @@
 <?php
-
 declare(strict_types=1);
 
 require_once __DIR__ . '/config/bootstrap.php';
 
-use App\Controllers\AdminController;
-use App\Controllers\AssociationController;
 use App\Controllers\AuthController;
-use App\Controllers\BusinessController;
-use App\Controllers\ContactController;
-use App\Controllers\HomeController;
-use App\Controllers\UserController;
+use App\Controllers\PageController;
 
 $route = trim((string) ($_GET['route'] ?? $_GET['page'] ?? 'home'), '/');
-$method = strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? 'GET'));
-
-$homeController = new HomeController();
-$authController = new AuthController();
-$adminController = new AdminController();
-$associationController = new AssociationController();
-$businessController = new BusinessController();
-$contactController = new ContactController();
-$userController = new UserController();
+$pageController = new PageController();
 
 switch ($route) {
     case '':
     case 'home':
-        echo $homeController->home();
-        break;
-    case 'platform':
-        echo $homeController->platform();
-        break;
-    case 'actors':
-        echo $homeController->actors();
-        break;
-    case 'contact':
-        echo $method === 'POST' ? $contactController->submit() : $homeController->contact();
+        $pageController->render('home');
         break;
     case 'login':
-        echo $method === 'POST' ? $authController->loginSubmit() : $authController->login();
-        break;
     case 'register':
-        echo $method === 'POST' ? $authController->registerSubmit() : $authController->register();
-        break;
-    case 'logout':
-        echo $authController->logout();
+        $pageController->render('login');
         break;
     case 'dashboard':
-        echo $homeController->dashboard();
-        break;
-    case 'admin':
-        echo $adminController->dashboard();
-        break;
-    case 'admin/users':
-        echo $method === 'POST' ? $adminController->saveUser() : $adminController->users();
-        break;
-    case 'admin/users/delete':
-        echo $adminController->deleteUser();
-        break;
-    case 'admin/items':
-        echo $method === 'POST' ? $adminController->saveFoodItem() : $adminController->items();
-        break;
-    case 'admin/items/delete':
-        echo $adminController->deleteFoodItem();
-        break;
-    case 'admin/reservations':
-        echo $method === 'POST' ? $adminController->updateReservationStatus() : $adminController->reservations();
-        break;
-    case 'admin/contacts':
-        echo $adminController->contacts();
+    case 'catalog':
+    case 'buyer':
+        $pageController->render('buyer_dashboard');
         break;
     case 'business':
-        echo $businessController->dashboard();
+        $pageController->render('merchant_dashboard');
         break;
     case 'association':
-        echo $associationController->dashboard();
+        $pageController->render('admin_association_dashboard');
         break;
-    case 'association/catalog':
-        echo $associationController->catalog();
+    case 'payment':
+        $pageController->render('payment');
         break;
-    case 'association/reservations':
-        echo $associationController->reservations();
+    case 'admin':
+        $pageController->render('superadmin_dashboard');
         break;
-    case 'association/reserve':
-        echo $associationController->reserve();
+    case 'admin-access':
+        $pageController->render('admin_access');
         break;
-    case 'business/items':
-        echo $method === 'POST' ? $businessController->saveFoodItem() : $businessController->items();
-        break;
-    case 'business/items/delete':
-        echo $businessController->deleteFoodItem();
-        break;
-    case 'business/reservations':
-        echo $method === 'POST' ? $businessController->updateReservationStatus() : $businessController->reservations();
-        break;
-    case 'catalog':
-        echo $userController->catalog();
-        break;
-    case 'reservations':
-        echo $userController->reservations();
-        break;
-    case 'reserve':
-        echo $userController->reserve();
+    case 'logout':
+        (new AuthController())->logout();
         break;
     default:
         http_response_code(404);
-        echo $homeController->notFound();
+        echo '404 - Page introuvable';
         break;
 }

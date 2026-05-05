@@ -1,5 +1,4 @@
 <?php
-
 declare(strict_types=1);
 
 namespace App\Models;
@@ -8,144 +7,98 @@ use PDO;
 
 final class ReservationModel extends BaseModel
 {
-    public function create(array $data): int
+    public function findAnnonceForUpdate(int $annonceId): array|false
     {
-        $db = $this->requireDb();
-        $id = $this->nextId('RESERVATIONS', 'ID_RESERVATION');
-        $stmt = $db->prepare(
-            'INSERT INTO RESERVATIONS (
-                ID_RESERVATION, ANNONCE_ID, UTILISATEUR_ID, ADMIN_ASSOCIATION_ID, QUANTITE_RESERVEE,
-                STATUT, DATE_RESERVATION, DATE_PICKUP, CREATED_AT
-             ) VALUES (
-                :id, :food_item_id, :user_id, :organization_id, :reserved_quantity,
-                :status, CURRENT_TIMESTAMP, :pickup_date, CURRENT_TIMESTAMP
-             )'
-        );
-        $stmt->execute([
-            'id' => $id,
-            'food_item_id' => $data['food_item_id'],
-            'user_id' => $data['user_id'] ?: null,
-            'organization_id' => $data['organization_id'] ?: null,
-            'reserved_quantity' => $data['reserved_quantity'],
-            'status' => $data['status'] ?? 'pending',
-            'pickup_date' => $data['pickup_date'] ?? date('Y-m-d H:i:s', strtotime('+2 hours')),
+        $stmt = $this->pdo->prepare('
+            SELECT ID_ANNONCE, QUANTITE, STATUT
+            FROM ANNONCES
+            WHERE ID_ANNONCE = :id_annonce
+            FOR UPDATE
+        ');
+        $stmt->bindValue(':id_annonce', $annonceId);
+        $stmt->execute();
+
+        return $stmt->fetch();
+    }
+
+    public function create(array $data): array
+    {
+        $this->pdo->beginTransaction();
+
+        $annonce = $this->findAnnonceForUpdate($data['annonce_id']);
+        if ($annonce === false) {
+            $this->pdo->rollBack();
+            throw new \RuntimeException('Annonce introuvable.', 404);
+        }
+
+        $quantityAvailable = (int) $annonce['QUANTITE'];
+        $status = (string) $annonce['STATUT'];
+
+        if (!in_array($status, ['available', 'priority_access'], true)) {
+            $this->pdo->rollBack();
+            throw new \RuntimeException('Cette annonce ne peut pas etre reservee actuellement.', 409);
+        }
+
+        if ($data['quantity'] > $quantityAvailable) {
+            $this->pdo->rollBack();
+            throw new \LengthException((string) $quantityAvailable);
+        }
+
+        $reservationId = $this->nextId('RESERVATIONS', 'ID_RESERVATION');
+        $stmt = $this->pdo->prepare('
+            INSERT INTO RESERVATIONS (
+                ID_RESERVATION,
+                ANNONCE_ID,
+                UTILISATEUR_ID,
+                ADMIN_ASSOCIATION_ID,
+                QUANTITE_RESERVEE,
+                STATUT,
+                DATE_RESERVATION,
+                DATE_PICKUP,
+                CREATED_AT
+            ) VALUES (
+                :id_reservation,
+                :annonce_id,
+                :utilisateur_id,
+                :admin_association_id,
+                :quantite_reservee,
+                :statut,
+                TO_TIMESTAMP(:date_reservation, \'YYYY-MM-DD HH24:MI:SS\'),
+                TO_TIMESTAMP(:date_pickup, \'YYYY-MM-DD HH24:MI:SS\'),
+                CURRENT_TIMESTAMP
+            )
+        ');
+        $stmt->bindValue(':id_reservation', $reservationId, PDO::PARAM_INT);
+        $stmt->bindValue(':annonce_id', $data['annonce_id'], PDO::PARAM_INT);
+        $stmt->bindValue(':utilisateur_id', $data['user_id'], $data['user_id'] === null ? PDO::PARAM_NULL : PDO::PARAM_INT);
+        $stmt->bindValue(':admin_association_id', $data['association_admin_id'], $data['association_admin_id'] === null ? PDO::PARAM_NULL : PDO::PARAM_INT);
+        $stmt->bindValue(':quantite_reservee', $data['quantity'], PDO::PARAM_INT);
+        $stmt->bindValue(':statut', 'pending');
+        $stmt->bindValue(':date_reservation', $data['reservation_date']);
+        $stmt->bindValue(':date_pickup', $data['pickup_date']);
+        $stmt->execute();
+
+        $remainingQuantity = $quantityAvailable - $data['quantity'];
+        $newStatus = $remainingQuantity === 0 ? 'reserved' : $status;
+
+        $stmtUpdate = $this->pdo->prepare('
+            UPDATE ANNONCES
+            SET QUANTITE = :quantite_restante,
+                STATUT = :nouveau_statut,
+                UPDATED_AT = CURRENT_TIMESTAMP
+            WHERE ID_ANNONCE = :id_annonce
+        ');
+        $stmtUpdate->execute([
+            'quantite_restante' => $remainingQuantity,
+            'nouveau_statut' => $newStatus,
+            'id_annonce' => $data['annonce_id'],
         ]);
 
-        return $id;
-    }
+        $this->pdo->commit();
 
-    public function allForUser(int $userId): array
-    {
-        $stmt = $this->requireDb()->prepare(
-            'SELECT
-                r.ID_RESERVATION AS id,
-                r.ANNONCE_ID AS food_item_id,
-                r.UTILISATEUR_ID AS user_id,
-                r.ADMIN_ASSOCIATION_ID AS organization_id,
-                r.QUANTITE_RESERVEE AS reserved_quantity,
-                r.STATUT AS status,
-                r.DATE_RESERVATION AS reserved_at,
-                r.DATE_PICKUP AS pickup_confirmed_at,
-                r.CREATED_AT AS created_at,
-                a.TITRE AS title,
-                a.UNITE AS unit,
-                p.NOM_COMMERCE AS business_name
-             FROM RESERVATIONS r
-             INNER JOIN ANNONCES a ON a.ID_ANNONCE = r.ANNONCE_ID
-             LEFT JOIN PROPRIETAIRES_COMMERCE p ON p.ID_COMMERCE = a.PROPRIETAIRE_ID
-             WHERE r.UTILISATEUR_ID = :user_id
-             ORDER BY r.CREATED_AT DESC'
-        );
-        $stmt->execute(['user_id' => $userId]);
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
-    }
-
-    public function allForOrganization(int $organizationId): array
-    {
-        $stmt = $this->requireDb()->prepare(
-            'SELECT
-                r.ID_RESERVATION AS id,
-                r.ANNONCE_ID AS food_item_id,
-                r.UTILISATEUR_ID AS user_id,
-                r.ADMIN_ASSOCIATION_ID AS organization_id,
-                r.QUANTITE_RESERVEE AS reserved_quantity,
-                r.STATUT AS status,
-                r.DATE_RESERVATION AS reserved_at,
-                r.DATE_PICKUP AS pickup_confirmed_at,
-                r.CREATED_AT AS created_at,
-                a.TITRE AS title,
-                a.UNITE AS unit,
-                u.PRENOM AS first_name,
-                u.NOM AS last_name
-             FROM RESERVATIONS r
-             INNER JOIN ANNONCES a ON a.ID_ANNONCE = r.ANNONCE_ID
-             LEFT JOIN UTILISATEURS u ON u.ID_UTIL = r.UTILISATEUR_ID
-             WHERE a.PROPRIETAIRE_ID = :organization_id
-             ORDER BY r.CREATED_AT DESC'
-        );
-        $stmt->execute(['organization_id' => $organizationId]);
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
-    }
-
-    public function allForAssociation(int $associationAdminId): array
-    {
-        $stmt = $this->requireDb()->prepare(
-            'SELECT
-                r.ID_RESERVATION AS id,
-                r.ANNONCE_ID AS food_item_id,
-                r.UTILISATEUR_ID AS user_id,
-                r.ADMIN_ASSOCIATION_ID AS organization_id,
-                r.QUANTITE_RESERVEE AS reserved_quantity,
-                r.STATUT AS status,
-                r.DATE_RESERVATION AS reserved_at,
-                r.DATE_PICKUP AS pickup_confirmed_at,
-                r.CREATED_AT AS created_at,
-                a.TITRE AS title,
-                a.UNITE AS unit,
-                p.NOM_COMMERCE AS business_name
-             FROM RESERVATIONS r
-             INNER JOIN ANNONCES a ON a.ID_ANNONCE = r.ANNONCE_ID
-             LEFT JOIN PROPRIETAIRES_COMMERCE p ON p.ID_COMMERCE = a.PROPRIETAIRE_ID
-             WHERE r.ADMIN_ASSOCIATION_ID = :association_id
-             ORDER BY r.CREATED_AT DESC'
-        );
-        $stmt->execute(['association_id' => $associationAdminId]);
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
-    }
-
-    public function allForAdmin(): array
-    {
-        $stmt = $this->requireDb()->query(
-            'SELECT
-                r.ID_RESERVATION AS id,
-                r.ANNONCE_ID AS food_item_id,
-                r.UTILISATEUR_ID AS user_id,
-                r.ADMIN_ASSOCIATION_ID AS organization_id,
-                r.QUANTITE_RESERVEE AS reserved_quantity,
-                r.STATUT AS status,
-                r.DATE_RESERVATION AS reserved_at,
-                r.DATE_PICKUP AS pickup_confirmed_at,
-                r.CREATED_AT AS created_at,
-                a.TITRE AS title,
-                COALESCE(p.NOM_COMMERCE, aa.NOM_ASSOCIATION) AS organization_name,
-                u.PRENOM AS first_name,
-                u.NOM AS last_name
-             FROM RESERVATIONS r
-             INNER JOIN ANNONCES a ON a.ID_ANNONCE = r.ANNONCE_ID
-             LEFT JOIN PROPRIETAIRES_COMMERCE p ON p.ID_COMMERCE = a.PROPRIETAIRE_ID
-             LEFT JOIN ADMINS_ASSOCIATION aa ON aa.ID_ADMIN_ASSOCIATION = r.ADMIN_ASSOCIATION_ID
-             LEFT JOIN UTILISATEURS u ON u.ID_UTIL = r.UTILISATEUR_ID
-             ORDER BY r.CREATED_AT DESC'
-        );
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
-    }
-
-    public function updateStatus(int $id, string $status): void
-    {
-        $stmt = $this->requireDb()->prepare('UPDATE RESERVATIONS SET STATUT = :status WHERE ID_RESERVATION = :id');
-        $stmt->execute([
-            'id' => $id,
-            'status' => $status,
-        ]);
+        return [
+            'reservation_id' => $reservationId,
+            'quantite_restante' => $remainingQuantity,
+        ];
     }
 }
